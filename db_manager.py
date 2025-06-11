@@ -23,9 +23,8 @@ def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Added created_at and updated_at with CURRENT_TIMESTAMP default for new rows
-        # For updated_at, will need a trigger or manual update in functions.
-        cursor.execute(f'''
+
+        users_table_sql = f"""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT DEFAULT NULL,
@@ -39,7 +38,9 @@ def init_db():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
+        """
+        cursor.execute(users_table_sql)
+
         # Example of a trigger to automatically update 'updated_at'
         # This might be specific to SQLite versions or require careful handling
         cursor.execute('''
