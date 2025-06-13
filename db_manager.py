@@ -454,6 +454,43 @@ def mark_job_delivered(job_id: str) -> bool:
     finally:
         if conn: conn.close()
 
+def get_all_undelivered_jobs() -> list[dict]:
+    # Fetches all jobs that are 'completed' or 'failed', assuming they haven't been marked 'delivered' yet
+    # by a subsequent call to mark_job_delivered().
+    conn = get_db_connection() # Assumes get_db_connection is defined
+    try:
+        cursor = conn.cursor()
+        # Jobs with status 'completed' or 'failed' are considered for delivery.
+        # The delivery process itself will mark them as 'delivered' to prevent re-processing.
+        cursor.execute("""
+            SELECT * FROM jobs
+            WHERE status = 'completed' OR status = 'failed'
+            ORDER BY updated_at ASC
+        """)
+        jobs = [dict(row) for row in cursor.fetchall()]
+        # Ensure logger is defined in db_manager.py if used here, or remove log.
+        # For example, if logger = logging.getLogger(__name__) is at the top of db_manager.py:
+        logger.info(f"Fetched {len(jobs)} jobs with status 'completed' or 'failed' for delivery processing.")
+        return jobs
+    except sqlite3.Error as e: # Assumes sqlite3 is imported
+        logger.error(f"Error getting all undelivered jobs: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+def get_job_details(job_id: str) -> dict | None:
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
+        job = cursor.fetchone()
+        return dict(job) if job else None
+    except sqlite3.Error as e:
+        logger.error(f"Error getting job details for job_id {job_id}: {e}")
+        return None
+    finally:
+        if conn: conn.close()
+
 def unban_user(user_id: int) -> bool:
     """Unbans a user by setting is_banned to FALSE."""
     conn = get_db_connection()

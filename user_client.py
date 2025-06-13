@@ -17,14 +17,20 @@ logger = logging.getLogger(__name__)
 
 DOWNLOADS_DIR = Path("./downloads_user_client")
 POLL_INTERVAL = 10  # seconds for checking new jobs
-REPLY_TIMEOUT = 120 # seconds for waiting for a search result from the group
-REPLY_POLL_INTERVAL = 5 # seconds for checking for replies to a command
+REPLY_TIMEOUT = 10 # seconds for waiting for a search result
+REPLY_POLL_INTERVAL = 3 # seconds for checking for replies to a command
 
 async def main_client_loop():
     logger.info("User client starting...")
     api_id = int(config.API_ID)
     api_hash = str(config.API_HASH)
-    private_group_id = int(config.PRIVATE_GROUP_ID) # Ensure it's an integer
+
+    # Ensure TARGET_BOT_ID is an integer
+    try:
+        target_bot_id_val = int(config.TARGET_BOT_ID)
+    except ValueError:
+        logger.error(f"TARGET_BOT_ID '{config.TARGET_BOT_ID}' is not a valid integer. Exiting.")
+        return
 
     client = TelegramClient('user_search_session', api_id, api_hash)
 
@@ -32,9 +38,7 @@ async def main_client_loop():
         logger.info("Connecting to Telegram...")
         await client.connect()
         if not await client.is_user_authorized():
-            logger.error("User account is not authorized. Please run an interactive session first to log in.")
-            logger.info("To authorize, you might need to run a separate script like:")
-            logger.info(f"from telethon import TelegramClient; client = TelegramClient('user_search_session', {api_id}, '{api_hash}'); await client.start()")
+            logger.error("User account is not authorized. Please run authorize_user_client.py first.")
             return
         logger.info("User client authorized and connected.")
 
@@ -47,32 +51,36 @@ async def main_client_loop():
 
             if job:
                 job_id = job['job_id']
-                # category = job['search_category'] # Category might not be needed for the /s command
                 query_text = job['query_text']
 
-                logger.info(f"Processing job ID: {job_id} - Query: '{query_text}'")
+                logger.info(f"Processing job ID: {job_id} - Query: '{query_text}' for TARGET_BOT_ID: {target_bot_id_val}")
 
                 try:
-                    search_command = f"/s {query_text}"
-                    logger.info(f"Sending command to group {private_group_id}: '{search_command}'")
-                    sent_command_msg = await client.send_message(private_group_id, search_command)
-                    sent_command_id = sent_command_msg.id
+                    search_command = f"/b {query_text}" # Command format changed
+                    logger.info(f"Sending command to TARGET_BOT_ID {target_bot_id_val}: '{search_command}'")
 
-                    found_reply = False
+                    sent_command_msg = await client.send_message(target_bot_id_val, search_command)
+                    # sent_command_id = sent_command_msg.id # Not strictly needed with new logic but good for reference
+
+                    found_reply_document = False # Renamed flag
                     start_time = time.time()
 
                     while time.time() - start_time < REPLY_TIMEOUT:
                         elapsed_time = int(time.time() - start_time)
-                        logger.debug(f"Job {job_id}: Waiting for reply... {elapsed_time}s / {REPLY_TIMEOUT}s")
+                        logger.debug(f"Job {job_id}: Waiting for message from TARGET_BOT_ID {target_bot_id_val}... {elapsed_time}s / {REPLY_TIMEOUT}s")
 
-                        # Fetch recent messages in the group, specifically looking for replies
-                        async for message in client.iter_messages(private_group_id, limit=10, reply_to=sent_command_id):
+                        # Fetch recent messages from the target bot
+                        async for message in client.iter_messages(target_bot_id_val, limit=10, from_user=target_bot_id_val):
+                            if message.date < sent_command_msg.date:
+                                # logger.debug(f"Skipping message {message.id} as it's older than our command sent at {sent_command_msg.date}.")
+                                continue
+
                             if message.document:
-                                logger.info(f"Job {job_id}: Reply with document found (Message ID: {message.id})")
+                                logger.info(f"Job {job_id}: Document found from TARGET_BOT_ID (Message ID: {message.id}, Date: {message.date})")
 
                                 filename = f"results_{job_id}.dat" # Default filename
                                 for attribute in message.document.attributes:
-                                    if isinstance(attribute, DocumentAttributeFilename):
+                                    if isinstance(attribute, DocumentAttributeFilename): # Check specific attribute types
                                         filename = attribute.file_name
                                         break
 
@@ -85,20 +93,21 @@ async def main_client_loop():
                                 logger.info(f"Job {job_id}: Document downloaded to {result_file_path.resolve()}")
 
                                 db_manager.update_job_status(job_id, 'completed', result_file_path=str(result_file_path.resolve()))
-                                found_reply = True
-                                break
+                                found_reply_document = True
+                                break # Exit message search loop
 
-                        if found_reply:
-                            break
+                        if found_reply_document:
+                            break # Exit timeout loop
 
                         await asyncio.sleep(REPLY_POLL_INTERVAL)
 
-                    if not found_reply:
-                        logger.warning(f"Job {job_id}: Timeout. No valid reply received within {REPLY_TIMEOUT} seconds.")
-                        db_manager.update_job_status(job_id, 'failed', error_message="Timeout waiting for reply from group.")
+                    if not found_reply_document:
+                        timeout_error_message = f"Timeout or no document found from Target Bot ID {target_bot_id_val} within {REPLY_TIMEOUT}s after sending command."
+                        logger.warning(f"Job {job_id}: {timeout_error_message}")
+                        db_manager.update_job_status(job_id, 'failed', error_message=timeout_error_message)
 
                 except Exception as e:
-                    logger.error(f"Job {job_id}: Error during processing: {e}", exc_info=True)
+                    logger.error(f"Job {job_id}: Error during processing with TARGET_BOT_ID {target_bot_id_val}: {e}", exc_info=True)
                     db_manager.update_job_status(job_id, 'failed', error_message=str(e))
             else:
                 logger.debug(f"No pending jobs. Waiting for {POLL_INTERVAL} seconds.")

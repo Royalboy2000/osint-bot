@@ -14,7 +14,7 @@ PRIVATE_GROUP_ID = -1001943303299
 ADMIN_IDS = [6647420637, 87654321] # Add your admin User IDs (Numeric IDs)
 
 # --- Payment Configuration ---
-BTC_ADDRESS = "1234567890" # Replace with your actual BTC address
+BTC_ADDRESS = "13DqtcwaqV7Akwi2K2VonaTa9ooijR1eSz" # Replace with your actual BTC address
 
 # --- Links ---
 SUPPORT_URL = "https://t.me/Lynch1TS"
@@ -27,3 +27,6 @@ CHANNEL_URL = "https://t.me/RedTeamArchives"
 # --- Other Settings ---
 # Example: MAX_FREE_SEARCHES = 5
 FREE_SEARCH_RESET_HOURS = 24
+
+# --- Target Bot for User Client ---
+TARGET_BOT_ID = 7965341662 # The ID of the bot user_client.py will send commands to
