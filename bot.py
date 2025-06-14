@@ -1031,10 +1031,21 @@ async def deliver_results_background_job(context: ContextTypes.DEFAULT_TYPE) -> 
                                 await context.bot.send_document(chat_id=user_id, document=f_doc,
                                                                 caption=f"✅ Results for your search job <code>{job_id}</code>.",
                                                                 parse_mode=ParseMode.HTML)
-                            mark_job_delivered(job_id)
                             logger.info(f"Successfully sent results for job {job_id} to user {user_id}.")
-                        except FileNotFoundError:
-                            logger.error(f"Result file {result_file_path} not found for job {job_id}.")
+                            mark_job_delivered(job_id) # Mark as delivered first
+
+                            # Attempt to delete the file after successful delivery and DB update
+                            try:
+                                os.remove(result_file_path)
+                                logger.info(f"Successfully deleted result file {result_file_path} for job {job_id}.")
+                            except FileNotFoundError:
+                                logger.warning(f"Result file {result_file_path} was already deleted or not found for job {job_id} during cleanup.")
+                            except Exception as e_remove:
+                                logger.error(f"Error deleting result file {result_file_path} for job {job_id}: {e_remove}")
+                                # Do not re-raise or prevent job from being marked delivered if deletion fails
+
+                        except FileNotFoundError: # This handles if the file was not found for sending
+                            logger.error(f"Result file {result_file_path} not found for job {job_id} (pre-send check).")
                             await context.bot.send_message(chat_id=user_id,
                                                            text=f"⚠️ Error delivering results for job <code>{job_id}</code>: Result file is missing.",
                                                            parse_mode=ParseMode.HTML)
