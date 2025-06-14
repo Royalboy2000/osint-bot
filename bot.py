@@ -288,14 +288,41 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     job_id = str(uuid.uuid4())[:8]
     if not create_search_job(job_id, user_id, category, query_text):
         await update.message.reply_text("⚠️ Failed to queue search.", reply_markup=get_main_menu_keyboard(user_id)); context.user_data.clear(); return ConversationHandler.END
-    reply_timeout = getattr(config, 'REPLY_TIMEOUT', 10)
-    confirm_msg = f"✅ Search for {category}: \"{query_text}\" (Job ID: `{job_id}`) queued.\nBot has {reply_timeout}s to respond. Results sent automatically."
-    await update.message.reply_text(confirm_msg, parse_mode='MarkdownV2')
-    await context.bot.send_message(user_id, "👋 Main Menu:", reply_markup=get_main_menu_keyboard(user_id))
-    context.user_data.clear(); return ConversationHandler.END
+    reply_timeout = getattr(config, 'REPLY_TIMEOUT', 10) # Check if REPLY_TIMEOUT is in config
+    confirm_msg = (
+        f"✅ Your search for {category}: \"{query_text}\" (Job ID: `{job_id}`) has been queued.\n"
+        f"The external bot has up to {reply_timeout} seconds to respond.\n"
+        "Results will be sent automatically when ready."
+    )
+    # Send confirmation and then the main menu as a new message with keyboard
+    await update.message.reply_text(
+        text=confirm_msg,
+        parse_mode='MarkdownV2' # Using MarkdownV2 for backticks
+    )
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="👋 Main Menu:",
+        reply_markup=get_main_menu_keyboard(user_id)
+    )
+
+    context.user_data.pop('search_category', None)
+    context.user_data.pop('using_token', None)
+    context.user_data.pop('using_free_search', None)
+    # last_search_init_time is for rate limiting, should persist across conversations for that user.
+    # Do not clear last_search_init_time here.
+    return ConversationHandler.END
 
 async def back_to_main_menu_from_search_cats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await start(update, context); context.user_data.clear(); return ConversationHandler.END
+    query = update.callback_query # Ensure query is defined for start()
+    await query.answer() # Answer callback before calling start
+
+    # Call start, which will edit the message to show the main menu
+    await start(update, context, message_text="👋 Main Menu:")
+
+    context.user_data.pop('search_category', None)
+    context.user_data.pop('using_token', None)
+    context.user_data.pop('using_free_search', None)
+    return ConversationHandler.END
 
 # --- Buy Conversation Handlers --- (Refactored for edit_message_text)
 # ... (buy_start, select_buy_option, select_plan_or_token, payment_confirmation_prompt, handle_payment_proof, back_to_buy_options, back_to_main_from_buy)
@@ -610,14 +637,23 @@ async def handle_search_again(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_new_search_in_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query; user_id = query.from_user.id
+
     current_time = time.time()
     last_search_time = context.user_data.get('last_search_init_time', 0)
+
     if (current_time - last_search_time) < RATE_LIMIT_SECONDS:
-        await query.answer(f"Please wait {int(RATE_LIMIT_SECONDS - (current_time - last_search_time))} more seconds.", show_alert=True)
+        await query.answer() # Answer silently first
+        # Then edit the message to show the rate limit, keeping original buttons
+        await query.edit_message_text(
+            text=f"Please wait {int(RATE_LIMIT_SECONDS - (current_time - last_search_time))} more seconds before starting a new search.",
+            reply_markup=query.message.reply_markup
+        )
         return ConversationHandler.END
 
-    await query.answer()
-    context.user_data['last_search_init_time'] = current_time # Update before credit check for this new interaction flow
+    await query.answer() # Answer silently if not rate-limited
+
+    # Update last_search_init_time only if proceeding past the rate limit check for this handler
+    context.user_data['last_search_init_time'] = current_time
 
     category_code = query.data.replace("new_search_cat_", "")
     category_map = {'domains': 'Domain', 'emails': 'Email', 'phone': 'Phone Number', 'name': 'Name', 'domain': 'Domain'}
