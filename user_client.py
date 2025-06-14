@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 DOWNLOADS_DIR = Path("./downloads_user_client")
 POLL_INTERVAL = 10  # seconds for checking new jobs
-REPLY_TIMEOUT = 10 # seconds for waiting for a search result
-REPLY_POLL_INTERVAL = 3 # seconds for checking for replies to a command
+REPLY_TIMEOUT = 120 # seconds for waiting for a search result (Increased)
+REPLY_POLL_INTERVAL = 5 # seconds for checking for replies to a command (Adjusted)
 
 async def main_client_loop():
     logger.info("User client starting...")
@@ -102,8 +102,8 @@ async def main_client_loop():
                         await asyncio.sleep(REPLY_POLL_INTERVAL)
 
                     if not found_reply_document:
-                        timeout_error_message = f"Timeout or no document found from Target Bot ID {target_bot_id_val} within {REPLY_TIMEOUT}s after sending command."
-                        logger.warning(f"Job {job_id}: {timeout_error_message}")
+                        timeout_error_message = f"Timeout: The target bot did not respond within {REPLY_TIMEOUT} seconds."
+                        logger.warning(f"Job {job_id}: {timeout_error_message} (Target Bot ID: {target_bot_id_val})")
                         db_manager.update_job_status(job_id, 'failed', error_message=timeout_error_message)
 
                 except Exception as e:
