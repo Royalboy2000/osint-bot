@@ -722,11 +722,12 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data.pop('search_category', None); context.user_data.pop('using_token', None); context.user_data.pop('using_free_search', None)
             return ConversationHandler.END
     job_id = str(uuid.uuid4())[:8]
-    if not create_search_job(job_id, user_id, category, query_text):
+    # Updated to include search_type='both'
+    if not create_search_job(job_id, user_id, category, query_text, search_type='both'):
         await update.message.reply_text("⚠️ Failed to queue search. Try again later.", reply_markup=get_main_menu_keyboard(user_id))
         context.user_data.pop('search_category', None); context.user_data.pop('using_token', None); context.user_data.pop('using_free_search', None)
         return ConversationHandler.END
-    confirm_msg = (f"✅ Your search for {html.escape(category)}: \"{html.escape(query_text)}\" (Job ID: <code>{job_id}</code>) has been queued.\n\n"
+    confirm_msg = (f"✅ Your search for {html.escape(category)}: \"{html.escape(query_text)}\" (Job ID: <code>{job_id}</code>) has been queued for both sources.\n\n"
                    "Results sent when ready.")
     await update.message.reply_text(text=confirm_msg, parse_mode='HTML', reply_markup=get_main_menu_keyboard(user_id))
     context.user_data.pop('search_category', None); context.user_data.pop('using_token', None); context.user_data.pop('using_free_search', None)
@@ -767,11 +768,12 @@ async def handle_search_again(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif using_free_search:
         if not decrement_user_free_searches(user_id): await context.bot.send_message(chat_id=user_id, text="⚠️ Error using free search.", reply_markup=get_main_menu_keyboard(user_id)); return
     new_job_id = str(uuid.uuid4())[:8]
-    if not create_search_job(new_job_id, user_id, category, query_text):
-        logger.error(f"Failed to create job {new_job_id} for user {user_id}.")
+    # Updated to include search_type='both'
+    if not create_search_job(new_job_id, user_id, category, query_text, search_type='both'):
+        logger.error(f"Failed to create job {new_job_id} (type: both) for user {user_id}.")
         await context.bot.send_message(chat_id=user_id, text="⚠️ Failed to queue search. Contact support.", reply_markup=get_main_menu_keyboard(user_id))
         return
-    confirm_msg = (f"✅ Repeated search for {html.escape(category)}: \"{html.escape(query_text)}\" (New Job ID: <code>{new_job_id}</code>) queued.\n\nResults when ready.")
+    confirm_msg = (f"✅ Repeated search for {html.escape(category)}: \"{html.escape(query_text)}\" (New Job ID: <code>{new_job_id}</code>) queued for both sources.\n\nResults when ready.")
     await context.bot.send_message(chat_id=user_id, text=confirm_msg, parse_mode='HTML', reply_markup=get_main_menu_keyboard(user_id))
 
 async def handle_new_search_in_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

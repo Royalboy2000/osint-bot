@@ -59,6 +59,7 @@ def init_db():
                 search_category TEXT NOT NULL,
                 query_text TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
+                search_type TEXT DEFAULT 'bot_only', -- Added search_type
                 result_file_path TEXT DEFAULT NULL,
                 error_message TEXT DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -66,6 +67,18 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+
+        # Add search_type column to jobs table if it doesn't exist (for existing databases)
+        try:
+            cursor.execute("PRAGMA table_info(jobs)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'search_type' not in columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN search_type TEXT DEFAULT 'bot_only'")
+                conn.commit()
+                logger.info("Added 'search_type' column to 'jobs' table.")
+        except sqlite3.Error as e:
+            logger.error(f"Error checking or adding 'search_type' column to 'jobs': {e}")
+
         cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS update_jobs_updated_at
             AFTER UPDATE ON jobs
@@ -245,20 +258,20 @@ def ban_user(user_id: int) -> bool:
     finally:
         if conn: conn.close()
 
-def create_search_job(job_id: str, user_id: int, category: str, query: str) -> bool:
+def create_search_job(job_id: str, user_id: int, category: str, query: str, search_type: str = 'bot_only') -> bool:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         # created_at and updated_at will use CURRENT_TIMESTAMP by default on insert
         cursor.execute("""
-            INSERT INTO jobs (job_id, user_id, search_category, query_text, status)
-            VALUES (?, ?, ?, ?, 'pending')
-        """, (job_id, user_id, category, query))
+            INSERT INTO jobs (job_id, user_id, search_category, query_text, status, search_type)
+            VALUES (?, ?, ?, ?, 'pending', ?)
+        """, (job_id, user_id, category, query, search_type))
         conn.commit()
-        logger.info(f"Created search job {job_id} for user {user_id}.")
+        logger.info(f"Created search job {job_id} for user {user_id} with search_type '{search_type}'.")
         return True
     except sqlite3.Error as e:
-        logger.error(f"Error creating search job {job_id}: {e}")
+        logger.error(f"Error creating search job {job_id} (type: {search_type}): {e}")
         return False
     finally:
         if conn: conn.close()
