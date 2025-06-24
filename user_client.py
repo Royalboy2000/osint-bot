@@ -115,11 +115,13 @@ async def main_client_loop():
                                 if message.date < sent_command_msg.date : # Ignore messages older than our command
                                     # For group replies, the reply itself might be slightly delayed, so its date could be >= sent_command_msg.date
                                     # This check is more for not picking up very old unrelated messages.
-                                    if not (is_group_search and message.is_reply and message.reply_to_message_id == sent_command_msg.id):
+                                    # Corrected attribute: message.reply_to_msg_id
+                                    if not (is_group_search and message.is_reply and message.reply_to_msg_id == sent_command_msg.id):
                                         continue
 
                                 if is_group_search:
-                                    if not (message.is_reply and message.reply_to_message_id == sent_command_msg.id):
+                                    # Corrected attribute: message.reply_to_msg_id
+                                    if not (message.is_reply and message.reply_to_msg_id == sent_command_msg.id):
                                         # logger.debug(f"Job {job_id}: Group message {message.id} is not a reply to our command {sent_command_msg.id}. Skipping.")
                                         continue
                                     logger.info(f"Job {job_id}: Found reply (MsgID: {message.id}) to our command (MsgID: {sent_command_msg.id}) in group {target_id}.")
