@@ -20,6 +20,7 @@ import html
 import json
 
 import config
+import db_manager # Added missing import
 from db_manager import (
     get_or_create_user,
     decrement_user_free_searches,
