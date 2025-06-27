@@ -258,6 +258,64 @@ def ban_user(user_id: int) -> bool:
     finally:
         if conn: conn.close()
 
+def get_stuck_processing_jobs(stuck_threshold_seconds: int) -> list[dict]:
+    """
+    Retrieves jobs that have been in 'processing' status for longer than
+    the specified threshold.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        # Calculate the cutoff time based on current time and threshold
+        # SQLite's julianday can be used for date arithmetic if needed,
+        # but comparing datetime strings directly works if they are ISO formatted.
+        # For simplicity, we'll compare based on 'updated_at'.
+        # Jobs are marked 'processing' when picked up, so 'updated_at' reflects this.
+        # If a job is picked up and then the client crashes, 'updated_at' for that job
+        # would be the time it was set to 'processing'.
+        cutoff_time = datetime.now() - timedelta(seconds=stuck_threshold_seconds)
+
+        cursor.execute("""
+            SELECT * FROM jobs
+            WHERE status = 'processing' AND updated_at < ?
+            ORDER BY updated_at ASC
+        """, (cutoff_time.isoformat(),))
+        jobs = [dict(row) for row in cursor.fetchall()]
+        return jobs
+    except sqlite3.Error as e:
+        logger.error(f"Error getting stuck processing jobs: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+def get_oldest_pending_job() -> dict | None:
+    """Retrieves the oldest job with 'pending' status."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1")
+        job_row = cursor.fetchone()
+        return dict(job_row) if job_row else None
+    except sqlite3.Error as e:
+        logger.error(f"Error getting oldest pending job: {e}")
+        return None
+    finally:
+        if conn: conn.close()
+
+def count_processing_jobs() -> int:
+    """Counts the number of jobs currently in 'processing' status."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM jobs WHERE status = 'processing'")
+        count = cursor.fetchone()[0]
+        return count
+    except sqlite3.Error as e:
+        logger.error(f"Error counting processing jobs: {e}")
+        return 0 # Return 0 on error to prevent issues in health check logic
+    finally:
+        if conn: conn.close()
+
 def create_search_job(job_id: str, user_id: int, category: str, query: str, search_type: str = 'bot_only') -> bool:
     conn = get_db_connection()
     try:

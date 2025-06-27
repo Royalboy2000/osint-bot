@@ -317,6 +317,72 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         except Exception as e:
             logger.error(f"Failed to send error message to chat {update.effective_chat.id}: {e}")
 
+# Health Check Constants
+PROCESSING_STUCK_THRESHOLD_SECONDS = 240  # Based on user_client REPLY_TIMEOUT (120s) * 2
+PENDING_STUCK_THRESHOLD_SECONDS = 60    # Based on user_client POLL_INTERVAL (10s) * 6
+ADMIN_ALERT_COOLDOWN_SECONDS = 300      # 5 minutes
+
+async def user_client_health_check(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Checks the health of user_client.py by monitoring job statuses in the database.
+    Sends alerts to admins if issues are detected.
+    """
+    now = datetime.now()
+    bot_data = context.bot_data
+
+    # Check for stuck 'processing' jobs
+    try:
+        stuck_processing_jobs = db_manager.get_stuck_processing_jobs(PROCESSING_STUCK_THRESHOLD_SECONDS)
+        if stuck_processing_jobs:
+            last_alert_time = bot_data.get('last_stuck_processing_alert_time', datetime.min)
+            if (now - last_alert_time).total_seconds() > ADMIN_ALERT_COOLDOWN_SECONDS:
+                job_ids = [job['job_id'] for job in stuck_processing_jobs]
+                message = (
+                    f"⚠️ **User Client Alert: Stuck Processing Jobs** ⚠️\n\n"
+                    f"The following jobs have been in 'processing' state for over {PROCESSING_STUCK_THRESHOLD_SECONDS // 60} minutes:\n"
+                    f"- `{(', '.join(job_ids))}`\n\n"
+                    f"This may indicate that `user_client.py` has crashed or is unresponsive while processing these tasks."
+                )
+                logger.warning(f"Health Check: Found stuck processing jobs: {job_ids}")
+                for admin_id in config.ADMIN_IDS:
+                    try:
+                        await context.bot.send_message(chat_id=admin_id, text=message, parse_mode=ParseMode.MARKDOWN_V2)
+                    except Exception as e:
+                        logger.error(f"Failed to send stuck processing alert to admin {admin_id}: {e}")
+                bot_data['last_stuck_processing_alert_time'] = now
+    except Exception as e:
+        logger.error(f"Error during health check (stuck processing jobs): {e}", exc_info=True)
+
+    # Check for 'pending' jobs not being picked up
+    try:
+        num_processing = db_manager.count_processing_jobs()
+        if num_processing == 0:
+            oldest_pending_job = db_manager.get_oldest_pending_job()
+            if oldest_pending_job:
+                created_at_str = oldest_pending_job.get('created_at')
+                if isinstance(created_at_str, str):
+                    created_at = datetime.fromisoformat(created_at_str)
+                    if (now - created_at).total_seconds() > PENDING_STUCK_THRESHOLD_SECONDS:
+                        last_alert_time = bot_data.get('last_pending_stuck_alert_time', datetime.min)
+                        if (now - last_alert_time).total_seconds() > ADMIN_ALERT_COOLDOWN_SECONDS:
+                            message = (
+                                f"⚠️ **User Client Alert: Pending Jobs Not Processed** ⚠️\n\n"
+                                f"There are pending jobs, and the oldest one (ID: `{oldest_pending_job['job_id']}`) "
+                                f"was created over {PENDING_STUCK_THRESHOLD_SECONDS // 60} minutes ago, "
+                                f"but no jobs are currently being processed.\n\n"
+                                f"This may indicate that `user_client.py` is not running or not polling for new jobs."
+                            )
+                            logger.warning(f"Health Check: Found old pending jobs not being processed. Oldest: {oldest_pending_job['job_id']}")
+                            for admin_id in config.ADMIN_IDS:
+                                try:
+                                    await context.bot.send_message(chat_id=admin_id, text=message, parse_mode=ParseMode.MARKDOWN_V2)
+                                except Exception as e:
+                                    logger.error(f"Failed to send pending stuck alert to admin {admin_id}: {e}")
+                            bot_data['last_pending_stuck_alert_time'] = now
+    except Exception as e:
+        logger.error(f"Error during health check (pending jobs): {e}", exc_info=True)
+
+
 # --- Buy Conversation Handlers ---
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query; await query.answer()
@@ -722,12 +788,12 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data.pop('search_category', None); context.user_data.pop('using_token', None); context.user_data.pop('using_free_search', None)
             return ConversationHandler.END
     job_id = str(uuid.uuid4())[:8]
-    # Updated to include search_type='both'
-    if not create_search_job(job_id, user_id, category, query_text, search_type='both'):
+    # Changed to 'bot_only' as per new requirement
+    if not create_search_job(job_id, user_id, category, query_text, search_type='bot_only'):
         await update.message.reply_text("⚠️ Failed to queue search. Try again later.", reply_markup=get_main_menu_keyboard(user_id))
         context.user_data.pop('search_category', None); context.user_data.pop('using_token', None); context.user_data.pop('using_free_search', None)
         return ConversationHandler.END
-    confirm_msg = (f"✅ Your search for {html.escape(category)}: \"{html.escape(query_text)}\" (Job ID: <code>{job_id}</code>) has been queued for both sources.\n\n"
+    confirm_msg = (f"✅ Your search for {html.escape(category)}: \"{html.escape(query_text)}\" (Job ID: <code>{job_id}</code>) has been queued.\n\n" # Message reverted
                    "Results sent when ready.")
     await update.message.reply_text(text=confirm_msg, parse_mode='HTML', reply_markup=get_main_menu_keyboard(user_id))
     context.user_data.pop('search_category', None); context.user_data.pop('using_token', None); context.user_data.pop('using_free_search', None)
@@ -768,12 +834,12 @@ async def handle_search_again(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif using_free_search:
         if not decrement_user_free_searches(user_id): await context.bot.send_message(chat_id=user_id, text="⚠️ Error using free search.", reply_markup=get_main_menu_keyboard(user_id)); return
     new_job_id = str(uuid.uuid4())[:8]
-    # Updated to include search_type='both'
-    if not create_search_job(new_job_id, user_id, category, query_text, search_type='both'):
-        logger.error(f"Failed to create job {new_job_id} (type: both) for user {user_id}.")
+    # Changed to 'bot_only' as per new requirement
+    if not create_search_job(new_job_id, user_id, category, query_text, search_type='bot_only'):
+        logger.error(f"Failed to create job {new_job_id} (type: bot_only) for user {user_id}.")
         await context.bot.send_message(chat_id=user_id, text="⚠️ Failed to queue search. Contact support.", reply_markup=get_main_menu_keyboard(user_id))
         return
-    confirm_msg = (f"✅ Repeated search for {html.escape(category)}: \"{html.escape(query_text)}\" (New Job ID: <code>{new_job_id}</code>) queued for both sources.\n\nResults when ready.")
+    confirm_msg = (f"✅ Repeated search for {html.escape(category)}: \"{html.escape(query_text)}\" (New Job ID: <code>{new_job_id}</code>) queued.\n\nResults when ready.") # Message reverted
     await context.bot.send_message(chat_id=user_id, text=confirm_msg, parse_mode='HTML', reply_markup=get_main_menu_keyboard(user_id))
 
 async def handle_new_search_in_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -859,6 +925,12 @@ def main() -> None:
     job_queue = application.job_queue
     job_queue.run_repeating(deliver_results_background_job, interval=30, first=10, name='result_delivery_job')
     logger.info("Background result delivery job scheduled.")
+
+    # Health Check for user_client.py
+    HEALTH_CHECK_INTERVAL_SECONDS = 30
+    job_queue.run_repeating(user_client_health_check, interval=HEALTH_CHECK_INTERVAL_SECONDS, first=HEALTH_CHECK_INTERVAL_SECONDS, name='user_client_health_check_job')
+    logger.info(f"User client health check job scheduled to run every {HEALTH_CHECK_INTERVAL_SECONDS} seconds.")
+
     application.add_handler(CallbackQueryHandler(handle_search_again, pattern=r'^search_again_'))
     application.add_handler(CallbackQueryHandler(handle_show_main_menu, pattern=r'^show_main_menu$'))
     search_conv_handler = ConversationHandler(
