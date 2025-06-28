@@ -13,7 +13,8 @@ DEFAULT_FREE_SEARCHES = 5
 # FREE_SEARCH_RESET_HOURS = 24 # This might come from main bot config
 
 def get_db_connection():
-    conn = sqlite3.connect(DATABASE_NAME)
+    # Increased timeout to 10 seconds to potentially mitigate 'database is locked' errors
+    conn = sqlite3.connect(DATABASE_NAME, timeout=10.0)
     conn.row_factory = sqlite3.Row # Access columns by name
     return conn
 
