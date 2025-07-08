@@ -1,0 +1,159 @@
+openapi: 3.0.0
+info:
+  title: OSINT Search API
+  version: v1.0.0
+  description: |
+    A RESTful API to proxy search requests to an OSINT search engine.
+    All endpoints require API key authentication.
+    The API does not expose or depend on any Telegram-session or bot-account data.
+
+servers:
+  - url: http://localhost:5000 # Default local server
+    description: Development server
+  # Add other environments like staging or production here if needed
+  # - url: https://api.example.com/v1
+  #   description: Production server
+
+components:
+  securitySchemes:
+    ApiKeyAuth: # Can be any name
+      type: apiKey
+      in: header
+      name: X-API-Key # Name of the header
+      description: API key for authentication.
+
+  schemas:
+    SearchRequest:
+      type: object
+      required:
+        - user_id
+        - query
+      properties:
+        user_id:
+          type: string
+          description: The unique identifier of the end user making the request.
+          example: "user12345"
+        query:
+          type: string
+          description: The search term to execute.
+          example: "example search query"
+
+    SearchResultItem:
+      type: object
+      description: A single item from the search results. Structure can vary.
+      additionalProperties: true # Allows for flexible, undefined properties in results
+      example:
+        id: "result-123"
+        title: "Mock Result 1 for 'example search query'"
+        snippet: "This is the first mock search result related to 'example search query'."
+        source: "MockSource1"
+
+    ApiResponseBase:
+      type: object
+      required:
+        - status
+        - message
+        - data
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+          description: Indicates the outcome of the request.
+        message:
+          type: string
+          description: Human-readable status or error message.
+        data:
+          type: array
+          description: Contains the search results on success, or an empty array on error.
+          items:
+            $ref: '#/components/schemas/SearchResultItem' # Default item type
+
+    ApiResponseSuccess:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseBase'
+        - type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            message:
+              type: string
+              example: "Search successful"
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SearchResultItem'
+
+    ApiResponseError:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseBase'
+        - type: object
+          properties:
+            status:
+              type: string
+              example: "error"
+            data:
+              type: array
+              example: [] # Empty array for data on error
+              items: {} # Explicitly empty items for error data array
+            message:
+              type: string
+              example: "Error message detailing the issue."
+
+security:
+  - ApiKeyAuth: [] # Applies ApiKeyAuth globally to all operations
+
+paths:
+  /search:
+    post:
+      summary: Perform a search
+      description: |
+        Accepts a `user_id` and `query` to perform a search via a backend OSINT engine.
+        Requires API key authentication.
+      tags:
+        - Search
+      operationId: searchOsint
+      requestBody:
+        description: User ID and search query
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search executed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseSuccess'
+        '400':
+          description: Bad Request - Invalid input, missing parameters, or malformed JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                example:
+                  status: "error"
+                  message: "Bad Request: Missing or invalid 'user_id'"
+                  data: []
+        '401':
+          description: Unauthorized - Missing or invalid API Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                example:
+                  status: "error"
+                  message: "Unauthorized: Invalid or missing API Key"
+                  data: []
+        '500': # General server error, though our app doesn't explicitly have one yet
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                example:
+                  status: "error"
+                  message: "Internal server error occurred."
+                  data: []
