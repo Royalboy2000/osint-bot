@@ -1,25 +1,27 @@
 openapi: 3.0.0
 info:
   title: OSINT Search API
-  version: v1.0.0
+  version: v1.1.0 # Version bump due to significant change in backend processing
   description: |
-    A RESTful API to proxy search requests to an OSINT search engine.
+    A RESTful API to initiate search jobs via a backend processing system
+    (typically interacting with an OSINT search engine or bot like `user_client.py`).
+    The API submits a job, polls for its completion, and returns the results.
     All endpoints require API key authentication.
-    The API does not expose or depend on any Telegram-session or bot-account data.
+    The API itself does not directly expose or depend on any Telegram-session or bot-account data,
+    but relies on a separate backend (`user_client.py`) to handle those interactions.
 
 servers:
-  - url: http://localhost:5000 # Default local server
+  - url: http://localhost:5000
     description: Development server
-  # Add other environments like staging or production here if needed
   # - url: https://api.example.com/v1
   #   description: Production server
 
 components:
   securitySchemes:
-    ApiKeyAuth: # Can be any name
+    ApiKeyAuth:
       type: apiKey
       in: header
-      name: X-API-Key # Name of the header
+      name: X-API-Key
       description: API key for authentication.
 
   schemas:
@@ -31,22 +33,54 @@ components:
       properties:
         user_id:
           type: string
-          description: The unique identifier of the end user making the request.
-          example: "user12345"
+          description: |
+            The unique identifier of the end user making the request.
+            This ID must be a string representation of an integer, as it will be used
+            to identify or create a user record in the backend database.
+          example: "1234567890"
         query:
           type: string
           description: The search term to execute.
           example: "example search query"
 
-    SearchResultItem:
+    # Generic result item, can be any JSON object if file was JSON/JSONL
+    # or a specific structure for plain text.
+    GenericSearchResultItem:
       type: object
-      description: A single item from the search results. Structure can vary.
-      additionalProperties: true # Allows for flexible, undefined properties in results
+      description: A single item from the search results. Structure can vary if from JSON/JSONL file.
+      additionalProperties: true
       example:
-        id: "result-123"
-        title: "Mock Result 1 for 'example search query'"
-        snippet: "This is the first mock search result related to 'example search query'."
-        source: "MockSource1"
+        id: "result-abc"
+        detail: "Some detail from a JSON result file"
+
+    TextFileResultItem:
+      type: object
+      description: Structure used when the result file is plain text.
+      properties:
+        type:
+          type: string
+          example: "text_file"
+        name:
+          type: string
+          example: "results_plain.txt"
+        content:
+          type: string
+          example: "This is the full content of the plain text file."
+        comment:
+          type: string
+          nullable: true
+          example: "File was empty or not valid JSON/JSONL."
+      required:
+        - type
+        - name
+        - content
+
+    # Data field can contain a mix, or just one type, but OpenAPI needs a common schema.
+    # Using oneOf to show possibilities.
+    AnySearchResultItem:
+      oneOf:
+        - $ref: '#/components/schemas/GenericSearchResultItem'
+        - $ref: '#/components/schemas/TextFileResultItem'
 
     ApiResponseBase:
       type: object
@@ -58,15 +92,17 @@ components:
         status:
           type: string
           enum: [success, error]
-          description: Indicates the outcome of the request.
         message:
           type: string
-          description: Human-readable status or error message.
         data:
           type: array
-          description: Contains the search results on success, or an empty array on error.
+          description: |
+            Contains the search results on success, or an empty array on error.
+            The structure of items in the array depends on the format of the result file
+            processed by the backend. It could be parsed JSON objects, or a specific
+            structure for plain text files (see TextFileResultItem).
           items:
-            $ref: '#/components/schemas/SearchResultItem' # Default item type
+            $ref: '#/components/schemas/AnySearchResultItem'
 
     ApiResponseSuccess:
       allOf:
@@ -78,11 +114,27 @@ components:
               example: "success"
             message:
               type: string
-              example: "Search successful"
+              example: "Search completed successfully."
             data:
               type: array
               items:
-                $ref: '#/components/schemas/SearchResultItem'
+                $ref: '#/components/schemas/AnySearchResultItem'
+              examples:
+                - # Example 1: Result from a JSON file
+                  - id: "doc1"
+                    value: "some json data"
+                  - id: "doc2"
+                    value: "more json data"
+                - # Example 2: Result from a plain text file
+                  - type: "text_file"
+                    name: "query_results.txt"
+                    content: "Line 1 of text.\nLine 2 of text."
+                - # Example 3: Empty result file
+                  - type: "text_file"
+                    name: "empty_results.txt"
+                    content: ""
+                    comment: "File was empty or not valid JSON/JSONL."
+
 
     ApiResponseError:
       allOf:
@@ -94,25 +146,28 @@ components:
               example: "error"
             data:
               type: array
-              example: [] # Empty array for data on error
-              items: {} # Explicitly empty items for error data array
+              example: []
+              items: {}
             message:
               type: string
               example: "Error message detailing the issue."
 
 security:
-  - ApiKeyAuth: [] # Applies ApiKeyAuth globally to all operations
+  - ApiKeyAuth: []
 
 paths:
   /search:
     post:
-      summary: Perform a search
+      summary: Perform a search by submitting a job
       description: |
-        Accepts a `user_id` and `query` to perform a search via a backend OSINT engine.
+        Accepts a `user_id` (must be an integer string) and `query`.
+        The API submits this as a job to a backend processing system.
+        It then polls for job completion and returns the results once processed.
+        The results are read from a file generated by the backend.
         Requires API key authentication.
       tags:
         - Search
-      operationId: searchOsint
+      operationId: searchOsintJob
       requestBody:
         description: User ID and search query
         required: true
@@ -122,21 +177,28 @@ paths:
               $ref: '#/components/schemas/SearchRequest'
       responses:
         '200':
-          description: Search executed successfully.
+          description: Search job completed successfully and results returned.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponseSuccess'
         '400':
-          description: Bad Request - Invalid input, missing parameters, or malformed JSON.
+          description: Bad Request - Invalid input, missing parameters, malformed JSON, or user_id not an integer string.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponseError'
-                example:
-                  status: "error"
-                  message: "Bad Request: Missing or invalid 'user_id'"
-                  data: []
+                examples:
+                  missingField:
+                    value:
+                      status: "error"
+                      message: "Bad Request: Missing 'user_id' field"
+                      data: []
+                  userIdNotInt:
+                    value:
+                      status: "error"
+                      message: "Bad Request: 'user_id' must be a string that represents an integer for database operations."
+                      data: []
         '401':
           description: Unauthorized - Missing or invalid API Key.
           content:
@@ -147,13 +209,42 @@ paths:
                   status: "error"
                   message: "Unauthorized: Invalid or missing API Key"
                   data: []
-        '500': # General server error, though our app doesn't explicitly have one yet
-          description: Internal Server Error.
+        '500':
+          description: |
+            Internal Server Error. This can occur due to various reasons:
+            - Failure to manage user records in the database.
+            - Failure to create the search job in the database.
+            - The backend job itself failed during processing (error message from backend will be in `message`).
+            - Error retrieving job status or result path post-completion.
+            - Error reading or processing the result file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                examples:
+                  jobCreationFailed:
+                    value:
+                      status: "error"
+                      message: "Internal server error: Failed to create search job."
+                      data: []
+                  backendJobFailed:
+                    value:
+                      status: "error"
+                      message: "Specific error from backend user_client.py processing."
+                      data: []
+                  fileProcessingError:
+                    value:
+                      status: "error"
+                      message: "Internal server error: Error processing result file."
+                      data: []
+        '504':
+          description: Gateway Timeout - The search job was submitted, but the API timed out waiting for the backend to process it and return results.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponseError'
                 example:
                   status: "error"
-                  message: "Internal server error occurred."
+                  message: "Search timed out waiting for results from the backend processor."
                   data: []
+```
