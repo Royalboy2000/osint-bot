@@ -1,7 +1,7 @@
 openapi: 3.0.0
 info:
   title: OSINT Search API
-  version: v1.1.0 # Version bump due to significant change in backend processing
+  version: v1.1.1 # Version bump for error message refinement
   description: |
     A RESTful API to initiate search jobs via a backend processing system
     (typically interacting with an OSINT search engine or bot like `user_client.py`).
@@ -9,6 +9,8 @@ info:
     All endpoints require API key authentication.
     The API itself does not directly expose or depend on any Telegram-session or bot-account data,
     but relies on a separate backend (`user_client.py`) to handle those interactions.
+    In case of backend errors, generic messages are returned to the API user,
+    while detailed errors are logged on the server.
 
 servers:
   - url: http://localhost:5000
@@ -43,8 +45,6 @@ components:
           description: The search term to execute.
           example: "example search query"
 
-    # Generic result item, can be any JSON object if file was JSON/JSONL
-    # or a specific structure for plain text.
     GenericSearchResultItem:
       type: object
       description: A single item from the search results. Structure can vary if from JSON/JSONL file.
@@ -55,7 +55,7 @@ components:
 
     TextFileResultItem:
       type: object
-      description: Structure used when the result file is plain text.
+      description: Structure used when the result file is plain text or if a file was empty/unparseable.
       properties:
         type:
           type: string
@@ -75,8 +75,6 @@ components:
         - name
         - content
 
-    # Data field can contain a mix, or just one type, but OpenAPI needs a common schema.
-    # Using oneOf to show possibilities.
     AnySearchResultItem:
       oneOf:
         - $ref: '#/components/schemas/GenericSearchResultItem'
@@ -129,12 +127,11 @@ components:
                   - type: "text_file"
                     name: "query_results.txt"
                     content: "Line 1 of text.\nLine 2 of text."
-                - # Example 3: Empty result file
+                - # Example 3: Empty result file (now represented as a text_file type)
                   - type: "text_file"
                     name: "empty_results.txt"
                     content: ""
                     comment: "File was empty or not valid JSON/JSONL."
-
 
     ApiResponseError:
       allOf:
@@ -211,31 +208,33 @@ paths:
                   data: []
         '500':
           description: |
-            Internal Server Error. This can occur due to various reasons:
-            - Failure to manage user records in the database.
-            - Failure to create the search job in the database.
-            - The backend job itself failed during processing (error message from backend will be in `message`).
-            - Error retrieving job status or result path post-completion.
-            - Error reading or processing the result file.
+            Internal Server Error. This may occur if there's an issue with the API server itself,
+            if a backend job fails during processing, or if there's an error handling the results.
+            Specific details are logged on the server.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponseError'
                 examples:
-                  jobCreationFailed:
+                  dbUserManagementFailed: # Example of a specific internal error type (now generic to user)
                     value:
                       status: "error"
-                      message: "Internal server error: Failed to create search job."
+                      message: "Internal server error: User record management failed." # This is already generic enough
                       data: []
                   backendJobFailed:
                     value:
                       status: "error"
-                      message: "Specific error from backend user_client.py processing."
+                      message: "Search job failed due to a backend processing error. Please check server logs for details or contact support." # New generic message
                       data: []
                   fileProcessingError:
                     value:
                       status: "error"
-                      message: "Internal server error: Error processing result file."
+                      message: "An error occurred while processing the search results. Please check server logs for details or contact support." # New generic message
+                      data: []
+                  unhandledException: # For the global 500 handler
+                    value:
+                      status: "error"
+                      message: "An unexpected internal server error occurred."
                       data: []
         '504':
           description: Gateway Timeout - The search job was submitted, but the API timed out waiting for the backend to process it and return results.

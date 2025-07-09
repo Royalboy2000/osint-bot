@@ -148,12 +148,14 @@ def search():
 
             except Exception as e:
                 app.logger.error(f"Error reading or processing result file {result_file_path} for job {job_id}: {e}", exc_info=True)
-                return jsonify({"status": "error", "data": [], "message": f"Internal server error: Error processing result file."}), 500
+                # Return a generic message to the API user
+                return jsonify({"status": "error", "data": [], "message": "An error occurred while processing the search results. Please check server logs for details or contact support."}), 500
 
         elif status == 'failed':
-            error_message = job_details.get('error_message', "Search job failed without a specific error message.")
-            app.logger.warning(f"Job {job_id} failed. Error: {error_message}")
-            return jsonify({"status": "error", "data": [], "message": error_message}), 500 # Using 500 for job failure, could be 422 if it's a user-side query issue
+            detailed_error_message = job_details.get('error_message', "Unknown backend processing error.")
+            app.logger.error(f"Job {job_id} failed due to backend processing. Detailed error: {detailed_error_message}")
+            # Return a generic message to the API user
+            return jsonify({"status": "error", "data": [], "message": "Search job failed due to a backend processing error. Please check server logs for details or contact support."}), 500
 
         # If status is 'pending' or 'processing', continue polling
         time.sleep(POLL_INTERVAL_SECONDS)
@@ -204,6 +206,6 @@ def method_not_allowed_error(error):
 
 @app.errorhandler(500)
 def internal_server_error(error):
-    # Log the error for debugging (e.g., using app.logger.error or a proper logging setup)
-    print(f"Internal Server Error: {error}", flush=True) # Basic print for now
-    return jsonify({"status": "error", "data": [], "message": "Internal Server Error"}), 500
+    # Log the error for debugging
+    app.logger.error(f"Unhandled Internal Server Error: {error}", exc_info=True)
+    return jsonify({"status": "error", "data": [], "message": "An unexpected internal server error occurred."}), 500

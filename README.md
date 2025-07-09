@@ -110,18 +110,39 @@ The primary endpoint is `/search`.
     ```
     The `user_id` here will be used to create/lookup a user in the shared database, and jobs will be associated with this user ID. This user will be subject to any limits (e.g., free searches) configured in the bot system.
 
-**Example Request (using cURL):**
+**Detailed Example Request (using `curl`):**
+
+To send a search request, you'll need:
+1.  The API server (`app.py`) running.
+2.  The backend processor (`user_client.py`) running.
+3.  Your specific API key for `app.py` (which you set via the `SEARCH_API_KEY` environment variable).
+
 ```bash
+# Replace 'your_actual_api_key_here' with the API key you configured for app.py
+# Replace '123456789' with a valid integer string for user_id
+# Replace 'information about example.com' with your desired search query
+
 curl -X POST http://localhost:5000/search \
--H "Content-Type: application/json" \
--H "X-API-Key: your_strong_and_unique_api_key_for_app.py" \
--d '{
-    "user_id": "987654321",
-    "query": "example osint query"
-}'
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: your_actual_api_key_here" \
+     -d '{
+         "user_id": "123456789",
+         "query": "information about example.com"
+     }'
 ```
 
-**Example Success Response (from a JSON result file):**
+**Understanding the Workflow with the `curl` Example:**
+1.  The `curl` command sends the JSON payload to `app.py`.
+2.  `app.py` validates the API key (`your_actual_api_key_here`) and the request data.
+3.  It generates a unique job ID and records a new job in the database (e.g., for `user_id: 123456789` with query `information about example.com`).
+4.  The separate `user_client.py` process, which is polling the database, picks up this new job.
+5.  `user_client.py` sends the command (e.g., `/b information about example.com`) to the configured `TARGET_BOT_ID` on Telegram.
+6.  `user_client.py` waits for the `TARGET_BOT_ID` to reply with a result file and downloads it.
+7.  `user_client.py` updates the job in the database with 'completed' status and the path to the downloaded file.
+8.  Meanwhile, `app.py` has been polling the database for this job ID. Once it sees 'completed', it reads the result file.
+9.  `app.py` then formats the content of the file (as JSON, JSONL, or plain text) and sends it back as the HTTP response to your `curl` command.
+
+**Example Success Response (if result file was JSON):**
 ```json
 {
     "status": "success",
@@ -156,6 +177,9 @@ curl -X POST http://localhost:5000/search \
 }
 ```
 (Refer to `openapi.yaml` for more detailed response codes and schemas).
+
+### Error Handling Notes
+In cases of backend processing errors (e.g., the `user_client.py` fails to complete a job, or there's an issue processing the result file), the API (`app.py`) will return a generic error message (typically with a 500 or 504 HTTP status). Detailed error information is logged on the server side by `app.py` and/or `user_client.py` and will not be exposed directly to the API client. This is for security and to provide a cleaner experience for API consumers. Administrators should consult the server logs for specific error details.
 
 ## API Documentation (OpenAPI/Swagger)
 

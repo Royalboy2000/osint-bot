@@ -186,10 +186,10 @@ def test_search_job_fails_in_db(client, mock_db_manager, mock_uuid, mock_time_sl
     payload = {'user_id': DB_INTERACTION_USER_ID_STR, 'query': 'failing query'}
     response = client.post('/search', data=json.dumps(payload), headers=headers)
 
-    assert response.status_code == 500 # As per app logic
+    assert response.status_code == 500
     json_data = response.get_json()
     assert json_data['status'] == 'error'
-    assert json_data['message'] == 'Backend processing failed spectacularly.'
+    assert json_data['message'] == "Search job failed due to a backend processing error. Please check server logs for details or contact support." # Generic message
 
 @patch('app.POLL_TIMEOUT_SECONDS', 0.2) # Shorten timeout for this specific test
 @patch('app.POLL_INTERVAL_SECONDS', 0.05) # Shorten interval for this specific test
@@ -274,7 +274,7 @@ def test_search_completed_error_reading_file(client, mock_db_manager, mock_uuid,
 
     assert response.status_code == 500
     json_data = response.get_json()
-    assert json_data['message'] == 'Internal server error: Error processing result file.'
+    assert json_data['message'] == "An error occurred while processing the search results. Please check server logs for details or contact support." # Generic message
 
 
 # --- Test API Key Authentication (Largely Unchanged but still relevant) ---
