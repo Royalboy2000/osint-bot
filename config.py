@@ -11,7 +11,7 @@ API_HASH = '660f3a6b78be716babbd8b6e127a350f'   # Replace with your API Hash fro
 PRIVATE_GROUP_ID = -1001943303299
 
 # --- Admin Configuration ---
-ADMIN_IDS = [6647420637, 87654321] # Add your admin User IDs (Numeric IDs)
+ADMIN_IDS = [7624457551] # Add your admin User IDs (Numeric IDs)
 
 # --- Payment Configuration ---
 BTC_ADDRESS = "13DqtcwaqV7Akwi2K2VonaTa9ooijR1eSz" # Replace with your actual BTC address
