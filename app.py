@@ -157,7 +157,7 @@ def hello():
 if __name__ == '__main__':
     # It's good practice to get port and debug mode from environment variables for production
     # import os # os is already imported at the top
-    port = int(os.environ.get("PORT", "9001")) # Ensure string default for get before int()
+    port = 9001 # Hardcoded port as requested
     debug_mode = os.environ.get("FLASK_DEBUG", "True").lower() == "true"
     # Note: For production, consider using a more robust WSGI server like Gunicorn or uWSGI
     app.run(debug=debug_mode, host='0.0.0.0', port=port)

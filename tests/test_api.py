@@ -55,7 +55,7 @@ def get_auth_header(key, expired=False, sub='test-client'):
         'iat': now
     }
     token = jwt.encode(payload, key, algorithm="HS256")
-    return {'Authorization': f'Bearer {token}'}
+    return {'X-API-Key': token}
 
 # --- API Tests ---
 
@@ -79,13 +79,13 @@ def test_search_success_polling(client, patch_config_and_db):
         with patch('time.sleep', return_value=None):
             response = client.post('/search',
                                    headers=get_auth_header(test_key),
-                                   json={'user_id': '12345', 'query': 'test query'})
+                                   json={'query': 'test2'})
 
     assert response.status_code == 200
     json_data = response.get_json()
     assert json_data['status'] == 'success'
     assert json_data['data'] == [{"result": "some data"}]
-    mock_db_manager.create_search_job.assert_called_once_with(job_id=job_id_mock, user_id=12345, category='api_search', query='test query')
+    mock_db_manager.create_search_job.assert_called_once_with(job_id=job_id_mock, user_id=config.DEDICATED_API_USER_ID, category='api_search', query='test2')
     os.remove(result_file_path)
 
 def test_search_job_failed(client, patch_config_and_db):
@@ -122,20 +122,15 @@ def test_search_timeout(client, patch_config_and_db):
 # --- Auth-specific Tests ---
 
 def test_search_no_auth_header(client):
-    """Test request without an Authorization header."""
+    """Test request without an X-API-Key header."""
     response = client.post('/search', json={'user_id': '12345', 'query': 'test'})
     assert response.status_code == 401
-    assert 'Missing Authorization header' in response.get_json()['message']
+    assert 'Missing X-API-Key header' in response.get_json()['message']
 
 def test_search_invalid_token_format(client):
-    """Test various malformed Authorization headers."""
-    # Not a bearer token
-    response = client.post('/search', headers={'Authorization': 'Basic dXNlcjpwYXNz'}, json={})
-    assert response.status_code == 401
-    assert "Invalid token type. Must be 'Bearer'" in response.get_json()['message']
-
+    """Test a malformed token."""
     # Malformed token
-    response = client.post('/search', headers={'Authorization': 'Bearer not.a.real.token'}, json={})
+    response = client.post('/search', headers={'X-API-Key': 'not.a.real.token'}, json={'user_id': '12345', 'query': 'test'})
     assert response.status_code == 401
     assert 'Invalid token' in response.get_json()['message']
 
@@ -156,13 +151,6 @@ def test_search_expired_token(client, patch_config_and_db):
     assert 'Token has expired' in response.get_json()['message']
 
 # --- Input Validation Tests ---
-
-def test_search_missing_user_id(client, patch_config_and_db):
-    """Test request with missing 'user_id' in JSON payload."""
-    _, test_key = patch_config_and_db
-    response = client.post('/search', headers=get_auth_header(test_key), json={'query': 'test'})
-    assert response.status_code == 400
-    assert "Missing 'user_id' field" in response.get_json()['message']
 
 def test_search_missing_query(client, patch_config_and_db):
     """Test request with missing 'query' in JSON payload."""
