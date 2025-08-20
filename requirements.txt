@@ -1,4 +1,4 @@
-python-telegram-bot==21.0.1
+python-telegram-bot[job-queue]==21.0.1
 telethon==1.36.0
 sqlalchemy==2.0.31
 Flask>=2.0.0
