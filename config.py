@@ -1,10 +1,10 @@
 # --- Bot Configuration ---
-BOT_TOKEN = '7663560180:AAHmw9YN10A9rt8vmeDdiqVlGRFPHOfK4J0'  # Replace with your Bot's API token from BotFather
-BOT_USERNAME = "Receive1337_bot"
+BOT_TOKEN = '7930218450:AAE-tIsd6zqr2uJrzaAWf3Hukxp1R8MaM5c'  # Replace with your Bot's API token from BotFather
+BOT_USERNAME = "RedTeamArchives1_bot"
 
 # --- User Account (Telethon) Configuration ---
-API_ID = 22524296               # Replace with your API ID from my.telegram.org
-API_HASH = '3742f0bebaffcc13d1a5eef1ac357d6c'   # Replace with your API Hash from my.telegram.org
+API_ID = 22852766               # Replace with your API ID from my.telegram.org
+API_HASH = '660f3a6b78be716babbd8b6e127a350f'   # Replace with your API Hash from my.telegram.org
 
 # --- Chat IDs ---
 # The Chat ID of the private group. Must start with -100 for channels/supergroups.
@@ -12,6 +12,7 @@ PRIVATE_GROUP_ID = -1001943303299
 
 # --- Admin Configuration ---
 ADMIN_IDS = [6647420637, 87654321] # Add your admin User IDs (Numeric IDs)
+API_JWT_KEY = "305e5273200ad45a8ffa2ed2c8b934e91ea9ec3feb67064a47eac1d49ba262ca" # Secret key for signing API JWTs
 
 # --- Payment Configuration ---
 BTC_ADDRESS = "13DqtcwaqV7Akwi2K2VonaTa9ooijR1eSz" # Replace with your actual BTC address

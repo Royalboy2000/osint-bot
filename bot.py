@@ -18,6 +18,8 @@ import os
 import time
 import html
 import json
+import jwt
+import re
 
 import config
 import db_manager # Added missing import
@@ -49,6 +51,7 @@ SELECTING_CATEGORY, TYPING_QUERY = range(2)
 SELECTING_BUY_OPTION, SELECTING_PLAN, SELECTING_TOKEN_AMOUNT, AWAITING_PAYMENT_CONFIRMATION, AWAITING_PROOF = range(10, 15)
 AWAITING_USER_ID_TO_BAN, CONFIRM_BAN, AWAITING_USER_ID_TO_UNBAN, CONFIRM_UNBAN = range(20, 24)
 ADMIN_GRANT_USER_ID, ADMIN_GRANT_TYPE, ADMIN_GRANT_SUB_PLAN, ADMIN_GRANT_TOKEN_AMOUNT, ADMIN_CONFIRM_GRANT = range(30, 35)
+ADMIN_JWT_COMPANY_ID, ADMIN_JWT_EXPIRATION = range(40, 42)
 
 USER_PAGE_SIZE = 5
 RATE_LIMIT_SECONDS = 5
@@ -108,6 +111,7 @@ def get_admin_panel_keyboard():
         [InlineKeyboardButton("🚫 Ban User", callback_data='admin_ban_user_start')],
         [InlineKeyboardButton("✅ Unban User", callback_data='admin_unban_user_start')],
         [InlineKeyboardButton("🎁 Grant Access", callback_data='admin_grant_access_start')],
+        [InlineKeyboardButton("🔑 Generate API Token", callback_data='admin_jwt_start')],
         [InlineKeyboardButton("👥 View Users", callback_data='admin_view_users_page_1')],
         [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data='back_to_main_from_admin_panel')]
     ]
@@ -692,6 +696,87 @@ async def admin_view_users_callback(update: Update, context: ContextTypes.DEFAUL
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text=message_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
+# --- JWT Generation Conversation Handlers ---
+async def admin_jwt_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Starts the JWT generation process."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        await query.edit_message_text("⚠️ Access Denied.")
+        return ConversationHandler.END
+
+    await query.edit_message_text("Enter a unique identifier for the company or client (e.g., 'company-name-inc'):")
+    return ADMIN_JWT_COMPANY_ID
+
+async def received_company_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Stores the company ID and asks for the expiration period."""
+    company_id = update.message.text.strip()
+    if not company_id:
+        await update.message.reply_text("Company ID cannot be empty. Please try again.")
+        return ADMIN_JWT_COMPANY_ID
+
+    context.chat_data['jwt_company_id'] = company_id
+
+    await update.message.reply_text(
+        "Great. Now, enter the token's validity period.\n"
+        "Examples: `30d` (30 days), `6m` (6 months), `1y` (1 year).\n"
+        "Use 'd' for days, 'm' for months, 'y' for years."
+    )
+    return ADMIN_JWT_EXPIRATION
+
+async def received_expiration_and_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Parses expiration, generates the JWT, and sends it."""
+    expiration_str = update.message.text.strip().lower()
+    match = re.match(r'^(\d+)([dmy])$', expiration_str)
+
+    if not match:
+        await update.message.reply_text("Invalid format. Please use a number followed by 'd', 'm', or 'y'.\nExample: `90d`")
+        return ADMIN_JWT_EXPIRATION
+
+    value, unit = int(match.group(1)), match.group(2)
+    now = datetime.now()
+
+    if unit == 'd':
+        delta = timedelta(days=value)
+    elif unit == 'm':
+        # timedelta doesn't have months, so approximate as 30 days per month
+        delta = timedelta(days=value * 30)
+    elif unit == 'y':
+        # Approximate as 365 days per year
+        delta = timedelta(days=value * 365)
+
+    expiration_time = now + delta
+    company_id = context.chat_data.get('jwt_company_id')
+
+    if not company_id:
+        await update.message.reply_text("Error: Company ID was lost. Please start over.", reply_markup=get_admin_panel_keyboard())
+        return ConversationHandler.END
+
+    payload = {
+        'sub': company_id,
+        'exp': expiration_time,
+        'iat': now
+    }
+
+    try:
+        token = jwt.encode(payload, config.API_JWT_KEY, algorithm="HS256")
+
+        await update.message.reply_text(
+            f"✅ Token generated successfully for `{company_id}`!\n"
+            f"Expires on: {expiration_time.strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
+            f"Here is the token:"
+        )
+        # Send the token in a separate message so it's easy to copy
+        await update.message.reply_text(f"<code>{token}</code>", parse_mode=ParseMode.HTML)
+
+    except Exception as e:
+        logger.error(f"Failed to generate JWT: {e}")
+        await update.message.reply_text("An internal error occurred while generating the token. The developer has been notified.")
+
+    # Clean up context
+    context.chat_data.pop('jwt_company_id', None)
+    return ConversationHandler.END
+
 # --- Helper function for search checks ---
 async def _can_perform_search(user_id: int, context: ContextTypes.DEFAULT_TYPE, query_update: Update = None) -> tuple[bool, str, bool, bool]:
     current_time = time.time()
@@ -994,6 +1079,18 @@ def main() -> None:
     application.add_handler(ban_conv_handler)
     application.add_handler(unban_conv_handler)
     application.add_handler(grant_access_conv_handler)
+
+    jwt_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_jwt_start, pattern='^admin_jwt_start$')],
+        states={
+            ADMIN_JWT_COMPANY_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_company_id)],
+            ADMIN_JWT_EXPIRATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_expiration_and_generate)],
+        },
+        fallbacks=[CallbackQueryHandler(cancel_admin_action, pattern='^admin_panel_main$'), CommandHandler('start', start_again_in_conversation)],
+        map_to_parent={ConversationHandler.END: ConversationHandler.END}
+    )
+    application.add_handler(jwt_conv_handler)
+
     logger.info("Bot starting...")
     application.run_polling()
 

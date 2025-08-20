@@ -81,6 +81,11 @@ async def main_client_loop():
                         return None
 
                     try:
+                        # Send /start command first
+                        await client.send_message(resolved_target_entity, '/start')
+                        logger.info(f"Job {job_id}: Sent /start to bot {target_id}. Waiting for 2 seconds.")
+                        await asyncio.sleep(2)
+
                         sent_command_msg = await client.send_message(resolved_target_entity, search_command)
                         logger.info(f"Job {job_id}: Command '{search_command}' sent to bot {target_id} (Message ID: {sent_command_msg.id})")
 

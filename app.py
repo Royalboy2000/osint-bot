@@ -1,14 +1,15 @@
 # Main application file
 from flask import Flask, request, jsonify
 import os
-import secrets
+import jwt
 from functools import wraps
 import uuid # For generating job IDs
 import time # For polling timeout
 import json # For reading result files that might be JSON
 
-# Import the database manager
-import db_manager # Assuming db_manager.py is in the same directory or accessible
+# Import the database manager and config
+import db_manager
+import config
 
 app = Flask(__name__)
 
@@ -21,30 +22,43 @@ app = Flask(__name__)
 POLL_TIMEOUT_SECONDS = int(os.environ.get("API_JOB_POLL_TIMEOUT", 120))
 POLL_INTERVAL_SECONDS = int(os.environ.get("API_JOB_POLL_INTERVAL", 5))
 
-# --- API Key Configuration ---
-DEFAULT_API_KEY = "your-secret-api-key-for-dev-only"
-API_KEY = os.environ.get("SEARCH_API_KEY")
-
-if API_KEY is None:
-    API_KEY = DEFAULT_API_KEY
-    app.logger.warning(f"SEARCH_API_KEY environment variable not set. Using default development key (THIS IS INSECURE): {API_KEY}")
-elif API_KEY == DEFAULT_API_KEY:
-    app.logger.warning(f"SEARCH_API_KEY is set to the default development key (THIS IS INSECURE): {API_KEY}")
-
-
-# --- Helper for API Key Authentication ---
-def require_api_key(func):
+# --- JWT Authentication Helper ---
+def require_jwt(func):
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        api_key_header = request.headers.get('X-API-Key')
-        if not api_key_header or not secrets.compare_digest(api_key_header, API_KEY):
-            app.logger.warning(f"Unauthorized API access attempt. Missing or invalid API Key from IP: {request.remote_addr}")
-            return jsonify({"status": "error", "data": [], "message": "Unauthorized: Invalid or missing API Key"}), 401
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            app.logger.warning(f"Unauthorized access attempt: Missing Authorization header from IP: {request.remote_addr}")
+            return jsonify({"status": "error", "message": "Unauthorized: Missing Authorization header"}), 401
+
+        parts = auth_header.split()
+
+        if parts[0].lower() != 'bearer':
+            app.logger.warning(f"Unauthorized access attempt: Invalid token type from IP: {request.remote_addr}")
+            return jsonify({"status": "error", "message": "Unauthorized: Invalid token type. Must be 'Bearer'"}), 401
+        elif len(parts) == 1:
+            return jsonify({"status": "error", "message": "Unauthorized: Token not found after 'Bearer'"}), 401
+        elif len(parts) > 2:
+            return jsonify({"status": "error", "message": "Unauthorized: Token contains spaces"}), 401
+
+        token = parts[1]
+        try:
+            payload = jwt.decode(token, config.API_JWT_KEY, algorithms=["HS256"])
+            # You could optionally attach the payload to the request context
+            # g.token_payload = payload
+            app.logger.info(f"Successfully authenticated client '{payload.get('sub')}' via JWT.")
+        except jwt.ExpiredSignatureError:
+            app.logger.warning(f"Auth failed: Expired token from IP: {request.remote_addr}")
+            return jsonify({"status": "error", "message": "Unauthorized: Token has expired"}), 401
+        except jwt.InvalidTokenError as e:
+            app.logger.warning(f"Auth failed: Invalid token from IP: {request.remote_addr}. Error: {e}")
+            return jsonify({"status": "error", "message": f"Unauthorized: Invalid token. {e}"}), 401
+
         return func(*args, **kwargs)
     return decorated_function
 
 @app.route('/search', methods=['POST'])
-@require_api_key
+@require_jwt
 def search():
     data = request.get_json(silent=True)
     if data is None:
