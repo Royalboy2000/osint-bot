@@ -754,8 +754,7 @@ async def received_expiration_and_generate(update: Update, context: ContextTypes
 
     payload = {
         'sub': company_id,
-        'exp': expiration_time,
-        'iat': now
+        'exp': expiration_time
     }
 
     try:
