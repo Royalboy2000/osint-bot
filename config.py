@@ -13,6 +13,7 @@ PRIVATE_GROUP_ID = -1001943303299
 # --- Admin Configuration ---
 ADMIN_IDS = [6647420637, 87654321] # Add your admin User IDs (Numeric IDs)
 API_JWT_KEY = "305e5273200ad45a8ffa2ed2c8b934e91ea9ec3feb67064a47eac1d49ba262ca" # Secret key for signing API JWTs
+DEDICATED_API_USER_ID = 999999999 # A fixed user ID for all jobs created via the external API.
 
 # --- Payment Configuration ---
 BTC_ADDRESS = "13DqtcwaqV7Akwi2K2VonaTa9ooijR1eSz" # Replace with your actual BTC address

@@ -26,27 +26,14 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("API_JOB_POLL_INTERVAL", 5))
 def require_jwt(func):
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            app.logger.warning(f"Unauthorized access attempt: Missing Authorization header from IP: {request.remote_addr}")
-            return jsonify({"status": "error", "message": "Unauthorized: Missing Authorization header"}), 401
+        token = request.headers.get('X-API-Key')
+        if not token:
+            app.logger.warning(f"Unauthorized access attempt: Missing X-API-Key header from IP: {request.remote_addr}")
+            return jsonify({"status": "error", "message": "Unauthorized: Missing X-API-Key header"}), 401
 
-        parts = auth_header.split()
-
-        if parts[0].lower() != 'bearer':
-            app.logger.warning(f"Unauthorized access attempt: Invalid token type from IP: {request.remote_addr}")
-            return jsonify({"status": "error", "message": "Unauthorized: Invalid token type. Must be 'Bearer'"}), 401
-        elif len(parts) == 1:
-            return jsonify({"status": "error", "message": "Unauthorized: Token not found after 'Bearer'"}), 401
-        elif len(parts) > 2:
-            return jsonify({"status": "error", "message": "Unauthorized: Token contains spaces"}), 401
-
-        token = parts[1]
         try:
             payload = jwt.decode(token, config.API_JWT_KEY, algorithms=["HS256"])
-            # You could optionally attach the payload to the request context
-            # g.token_payload = payload
-            app.logger.info(f"Successfully authenticated client '{payload.get('sub')}' via JWT.")
+            app.logger.info(f"Successfully authenticated client '{payload.get('sub')}' via JWT in X-API-Key header.")
         except jwt.ExpiredSignatureError:
             app.logger.warning(f"Auth failed: Expired token from IP: {request.remote_addr}")
             return jsonify({"status": "error", "message": "Unauthorized: Token has expired"}), 401
@@ -64,24 +51,9 @@ def search():
     if data is None:
         return jsonify({"status": "error", "data": [], "message": "Bad Request: Malformed or missing JSON body"}), 400
 
-    user_id_str = data.get('user_id') # This is the user_id from the API consumer
     query = data.get('query')
 
     # --- Input Validation ---
-    if user_id_str is None:
-        return jsonify({"status": "error", "data": [], "message": "Bad Request: Missing 'user_id' field"}), 400
-    if not isinstance(user_id_str, str):
-        return jsonify({"status": "error", "data": [], "message": "Bad Request: 'user_id' must be a string"}), 400
-    if len(user_id_str.strip()) == 0:
-        return jsonify({"status": "error", "data": [], "message": "Bad Request: 'user_id' cannot be empty or just whitespace"}), 400
-
-    # The user_id for the database (jobs.user_id FK to users.user_id) must be an integer.
-    # The API consumer provides a string `user_id_str`. We'll attempt to convert it to an int.
-    try:
-        db_user_id_for_job = int(user_id_str)
-    except ValueError:
-        return jsonify({"status": "error", "data": [], "message": "Bad Request: 'user_id' must be a string that represents an integer for database operations."}), 400
-
     if query is None:
         return jsonify({"status": "error", "data": [], "message": "Bad Request: Missing 'query' field"}), 400
     if not isinstance(query, str):
@@ -90,26 +62,25 @@ def search():
         return jsonify({"status": "error", "data": [], "message": "Bad Request: 'query' cannot be empty or just whitespace"}), 400
 
     sanitized_query = query.strip()
-    # The original user_id_str is kept for logging/reference; db_user_id_for_job is for DB interaction.
+
+    # Use the dedicated API user ID from config for all API-based jobs
+    db_user_id_for_job = config.DEDICATED_API_USER_ID
 
     # --- Job Submission and Polling ---
     job_id = uuid.uuid4().hex
 
-    # Ensure user exists in DB for foreign key constraint in jobs table.
-    # The username can be generic, e.g., "api_user_<db_user_id_for_job>".
-    # This user_id (db_user_id_for_job) will be subject to bot's free search limits, etc.
+    # Ensure the dedicated API user exists in the DB.
     db_user_record = db_manager.get_or_create_user(user_id=db_user_id_for_job, username=f"api_user_{db_user_id_for_job}")
     if not db_user_record:
-        app.logger.error(f"Failed to get or create user in database for db_user_id: {db_user_id_for_job}")
-        return jsonify({"status": "error", "data": [], "message": "Internal server error: User record management failed."}), 500
+        app.logger.error(f"Failed to get or create dedicated API user in database for db_user_id: {db_user_id_for_job}")
+        return jsonify({"status": "error", "data": [], "message": "Internal server error: Dedicated API user management failed."}), 500
 
     # Create the search job with a default category "api_search"
-    # Note: The `user_id` field in `create_search_job` refers to `jobs.user_id` which is the Telegram user ID.
     if not db_manager.create_search_job(job_id=job_id, user_id=db_user_id_for_job, category="api_search", query=sanitized_query):
         app.logger.error(f"Failed to create search job for job_id: {job_id}, db_user_id: {db_user_id_for_job}")
         return jsonify({"status": "error", "data": [], "message": "Internal server error: Failed to create search job."}), 500
 
-    app.logger.info(f"Job {job_id} created for API user_id_str '{user_id_str}' (db_user_id: {db_user_id_for_job}), query: '{sanitized_query}'")
+    app.logger.info(f"Job {job_id} created for dedicated API user (db_user_id: {db_user_id_for_job}), query: '{sanitized_query}'")
 
     # Poll for job completion using module-level constants
     start_time = time.time()
@@ -175,7 +146,7 @@ def search():
         time.sleep(POLL_INTERVAL_SECONDS)
 
     # If loop finishes, it means timeout
-    app.logger.warning(f"Job {job_id} (API user '{user_id_str}') timed out after {POLL_TIMEOUT_SECONDS} seconds waiting for completion by user_client.")
+    app.logger.warning(f"Job {job_id} (API user '{db_user_id_for_job}') timed out after {POLL_TIMEOUT_SECONDS} seconds waiting for completion by user_client.")
     return jsonify({"status": "error", "data": [], "message": "Search timed out waiting for results from the backend processor."}), 504
 
 
@@ -186,7 +157,7 @@ def hello():
 if __name__ == '__main__':
     # It's good practice to get port and debug mode from environment variables for production
     # import os # os is already imported at the top
-    port = int(os.environ.get("PORT", "5000")) # Ensure string default for get before int()
+    port = int(os.environ.get("PORT", "9001")) # Ensure string default for get before int()
     debug_mode = os.environ.get("FLASK_DEBUG", "True").lower() == "true"
     # Note: For production, consider using a more robust WSGI server like Gunicorn or uWSGI
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
