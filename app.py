@@ -155,7 +155,7 @@ def search():
 
     # If loop finishes, it means timeout
     app.logger.warning(f"Job {job_id} (API user '{db_user_id_for_job}') timed out after {POLL_TIMEOUT_SECONDS} seconds waiting for completion by user_client.")
-    return jsonify({"status": "failed", "data": [], "message": "Search timed out: The bot did not return a file within the time limit."}), 504
+    return jsonify({"status": "failed", "data": [], "message": "no data found"}), 504
 
 
 @app.route('/')
