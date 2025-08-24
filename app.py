@@ -52,6 +52,7 @@ def search():
         return jsonify({"status": "error", "data": [], "message": "Bad Request: Malformed or missing JSON body"}), 400
 
     query = data.get('query')
+    verbose = data.get('verbose', False) # Get verbose flag, default to False
 
     # --- Input Validation ---
     if query is None:
@@ -60,6 +61,8 @@ def search():
         return jsonify({"status": "error", "data": [], "message": "Bad Request: 'query' must be a string"}), 400
     if len(query.strip()) == 0:
         return jsonify({"status": "error", "data": [], "message": "Bad Request: 'query' cannot be empty or just whitespace"}), 400
+    if not isinstance(verbose, bool):
+        return jsonify({"status": "error", "data": [], "message": "Bad Request: 'verbose' must be a boolean (true or false)"}), 400
 
     sanitized_query = query.strip()
 
@@ -97,6 +100,11 @@ def search():
         app.logger.debug(f"Job {job_id} status: {status}")
 
         if status == 'completed':
+            if not verbose:
+                # If not verbose, just return success without the data.
+                app.logger.info(f"Job {job_id} completed. Returning non-verbose success response.")
+                return jsonify({"status": "success", "data": [], "message": "Search completed successfully."}), 200
+
             result_file_path = job_details.get('result_file_path')
             if not result_file_path:
                 app.logger.error(f"Job {job_id} completed but no result file path found in DB record.")
@@ -128,7 +136,7 @@ def search():
                         app.logger.info(f"Result file {result_file_path} for job {job_id} is not JSON/JSONL. Treating as plain text.")
                         data_payload = [{"type": "text_file", "name": os.path.basename(result_file_path), "content": file_content_raw}]
 
-                app.logger.info(f"Job {job_id} completed. Returning content from {result_file_path}.")
+                app.logger.info(f"Job {job_id} completed. Returning verbose content from {result_file_path}.")
                 return jsonify({"status": "success", "data": data_payload, "message": "Search completed successfully."}), 200
 
             except Exception as e:
@@ -147,7 +155,7 @@ def search():
 
     # If loop finishes, it means timeout
     app.logger.warning(f"Job {job_id} (API user '{db_user_id_for_job}') timed out after {POLL_TIMEOUT_SECONDS} seconds waiting for completion by user_client.")
-    return jsonify({"status": "error", "data": [], "message": "Search timed out waiting for results from the backend processor."}), 504
+    return jsonify({"status": "failed", "data": [], "message": "Search timed out: The bot did not return a file within the time limit."}), 504
 
 
 @app.route('/')

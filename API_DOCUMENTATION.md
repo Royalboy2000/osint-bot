@@ -21,11 +21,14 @@ This is the main endpoint for initiating a search query.
 
 ### Request Body
 
-The request body must be a JSON object containing a single field:
+The request body must be a JSON object containing the following fields:
 
 - `query` (string, required): The search term you want to look up.
+- `verbose` (boolean, optional, default: `false`): Determines the level of detail in the success response.
+  - If `false`, the response will only indicate success without returning the search results.
+  - If `true`, the response will include the full search results in the `data` field.
 
-**Example Request:**
+**Example Request (Non-verbose):**
 
 ```bash
 # Replace YOUR_JWT_TOKEN with a valid token
@@ -33,7 +36,21 @@ curl -X POST http://YOUR_SERVER_IP:9001/search \
      -H "Content-Type: application/json" \
      -H "X-API-Key: YOUR_JWT_TOKEN" \
      -d '{
-         "query": "example.com"
+         "query": "example.com",
+         "verbose": false
+     }'
+```
+
+**Example Request (Verbose):**
+
+```bash
+# Replace YOUR_JWT_TOKEN with a valid token
+curl -X POST http://YOUR_SERVER_IP:9001/search \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: YOUR_JWT_TOKEN" \
+     -d '{
+         "query": "example.com",
+         "verbose": true
      }'
 ```
 
@@ -41,14 +58,18 @@ curl -X POST http://YOUR_SERVER_IP:9001/search \
 
 #### Success (200 OK)
 
-If the search completes successfully, the API will return a JSON object with the results.
+The success response depends on the `verbose` flag.
 
-- **`status`**: `"success"`
-- **`data`**: An array of result objects. The format of these objects depends on the data found.
-- **`message`**: A success message.
+**Non-Verbose Success Response (`verbose: false`)**
+```json
+{
+    "status": "success",
+    "data": [],
+    "message": "Search completed successfully."
+}
+```
 
-**Example Success Response:**
-
+**Verbose Success Response (`verbose: true`)**
 ```json
 {
     "status": "success",
@@ -63,13 +84,22 @@ If the search completes successfully, the API will return a JSON object with the
 
 #### Timeout (504 Gateway Timeout)
 
-If the search takes too long to process on the backend, the API will time out. This does not necessarily mean the search failed, only that the API did not receive a result within the time limit.
+If the search takes too long to process on the backend, the API will time out.
 
-- **`status`**: `"error"`
-- **`message`**: `"Search timed out waiting for results from the backend processor."`
+- **`status`**: `"failed"`
+- **`message`**: `"Search timed out: The bot did not return a file within the time limit."`
+
+**Example Timeout Response:**
+```json
+{
+    "status": "failed",
+    "data": [],
+    "message": "Search timed out: The bot did not return a file within the time limit."
+}
+```
 
 #### Errors
 
-- **400 Bad Request**: The request body is malformed or missing the required `query` field.
+- **400 Bad Request**: The request body is malformed or missing the required `query` field, or `verbose` is not a boolean.
 - **401 Unauthorized**: The `X-API-Key` header is missing, or the provided JWT is invalid, expired, or has a bad signature.
 - **500 Internal Server Error**: An unexpected error occurred on the server.
