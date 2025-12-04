@@ -1,0 +1,63 @@
+# === Telegram Bot (bot.py) Configuration ===
+BOT_TOKEN = "YOUR_TELEGRAM_BOT_FATHER_TOKEN_HERE"
+# Optional: Your bot's username without the @ symbol (e.g., "MyAwesomeBot")
+# Used in some informational messages or if needed for specific deep linking.
+BOT_USERNAME = "YourBotUsername"
+
+
+# === Telegram User Account (user_client.py) Configuration ===
+# Get these from https://my.telegram.org/apps
+API_ID = 1234567 # Replace with your actual API ID (integer)
+API_HASH = "your_api_hash_here" # Replace with your actual API Hash (string)
+
+
+# === Admin Configuration ===
+# List of numeric Telegram User IDs who will have admin privileges.
+# Example: ADMIN_IDS = [123456789, 987654321]
+ADMIN_IDS = []
+
+
+# === Target Bot for User Client Searches ===
+# The numeric User ID of the Telegram bot that user_client.py will send search commands to.
+TARGET_BOT_ID = 0 # Replace with the actual Target Bot User ID (integer)
+
+
+# === Payment Configuration ===
+# Your Bitcoin address to display for payments.
+BTC_ADDRESS = "YOUR_BTC_ADDRESS_HERE"
+
+
+# === Links (Optional) ===
+# URL for the "Support" button in the bot's main menu.
+SUPPORT_URL = "https://t.me/your_support_contact_or_group"
+# URL for the "Channel" button in the bot's main menu.
+CHANNEL_URL = "https://t.me/your_channel_link"
+
+
+# === Database Configuration (Currently hardcoded in db_manager.py) ===
+# DATABASE_NAME = "bot_database.db" # Example, currently defined in db_manager.py
+
+
+# === Search Behavior Configuration ===
+# Time in seconds user_client.py will wait for a reply from TARGET_BOT_ID
+# This is already defined as a constant in user_client.py, but shown here for completeness of settings.
+# USER_CLIENT_REPLY_TIMEOUT = 10
+
+# Time in seconds users of your main bot must wait between initiating new searches.
+# This is already defined as a constant in bot.py.
+# USER_SEARCH_RATE_LIMIT_SECONDS = 5
+
+# Number of free daily searches for users.
+# This is already defined as a constant in db_manager.py and bot.py.
+# DEFAULT_FREE_SEARCHES = 5
+
+# Hours after which free searches reset.
+# This variable `FREE_SEARCH_RESET_HOURS` is present in the actual `config.py`
+# and used by bot.py. Value is typically 24.
+# FREE_SEARCH_RESET_HOURS = 24
+
+# --- Deprecated / Not Currently Used by user_client.py if TARGET_BOT_ID is set ---
+# The Chat ID of a private group/channel user_client.py would send commands to.
+# Must start with -100 for channels/supergroups.
+# Example: PRIVATE_GROUP_ID = -1001234567890
+# PRIVATE_GROUP_ID = 0

@@ -1,0 +1,38 @@
+# Bot To-Do List
+
+## User-Facing Features (Ensure all are fully implemented and working):
+- [ ] Interactive Search: Users can initiate searches through inline buttons for categories like Domains, Emails, Phone Numbers, and Names. (Verify all categories work post-fixes)
+- [ ] Automated Results: Search results (files) are automatically delivered to the user once processed. (Covered by deliver_results_background_job)
+- [ ] Payment System (Simulated):
+    - [ ] Option to "Buy" monthly plans (1 Month, 3 Months, Lifetime) or individual search tokens.
+    - [ ] Displays a BTC address for payment.
+    - [ ] Prompts users to confirm payment and submit proof (forwarded to admins).
+- [ ] Access Tiers:
+    - [ ] 5 Free daily searches (resets every 24 hours or when an admin grants access).
+    - [ ] Searches prioritize active subscriptions, then tokens, then free daily searches. (Logic reviewed in search fixes)
+- [ ] Rate Limiting: Users are limited to initiating one new search every 5 seconds. (Reviewed and adjusted in search fixes)
+- [ ] Status Updates: Users are informed about their search queue status, potential delays, and available credits (on /start). (Partially addressed by message changes)
+- [ ] Support & Channel Links: Easy access to support and an informational channel. (Ensure these are present and correct on main menu)
+
+## Admin Features (via Admin Panel - Ensure all are fully implemented and working):
+- [ ] Admin Identification: Specific users (defined in config.py) have access to the Admin Panel.
+- [ ] Ban/Unban Users: Admins can ban or unban users by their Telegram User ID.
+- [ ] Grant Access: Admins can manually grant users:
+    - [ ] Subscription plans (1 Month, 3 Months, Lifetime).
+    - [ ] A specific number of search tokens.
+    - [ ] Granting access also resets the user's daily free search count.
+- [ ] View Users: Admins can view a paginated list of all registered users (Implemented in step 5).
+- [ ] Payment Proof Forwarding: Admins receive messages when users submit payment proof.
+
+## Bugs to Fix / Verify Fixed:
+- [X] `NameError: name 'deliver_results_background_job' is not defined` (Fixed in step 1)
+- [X] "Network error. Check connection and try again." (Addressed in step 2 by increasing client timeout and improving messages)
+- [X] `ERROR - Error editing message in start callback: There is no text in the message to edit` (Fixed in step 3)
+- [X] Search button not working after a user does 1 search (includes "search query again" and "new search in category"). (Addressed in step 4)
+- [ ] `HTTP/1.1 400 Bad Request` for `editMessageText` (Log: `2025-06-14 11:33:06,375`): This specific instance was related to the "no text in message to edit" which was fixed. Monitor if other 400 errors for `editMessageText` occur.
+- [ ] General review: Ensure no sensitive info is revealed to non-admin users. (Planned for step 7)
+
+## General Improvements:
+- [ ] Review all user-facing messages for clarity, consistency, and grammar.
+- [ ] Ensure all conversation handlers properly end and clear user_data to prevent state bleeding. (Largely addressed in search fixes, but good to keep in mind for other conversations like buy/admin).
+- [ ] Comprehensive testing of all features after all fixes are applied.

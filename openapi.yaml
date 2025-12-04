@@ -1,0 +1,249 @@
+openapi: 3.0.0
+info:
+  title: OSINT Search API
+  version: v1.1.1 # Version bump for error message refinement
+  description: |
+    A RESTful API to initiate search jobs via a backend processing system
+    (typically interacting with an OSINT search engine or bot like `user_client.py`).
+    The API submits a job, polls for its completion, and returns the results.
+    All endpoints require API key authentication.
+    The API itself does not directly expose or depend on any Telegram-session or bot-account data,
+    but relies on a separate backend (`user_client.py`) to handle those interactions.
+    In case of backend errors, generic messages are returned to the API user,
+    while detailed errors are logged on the server.
+
+servers:
+  - url: http://localhost:5000
+    description: Development server
+  # - url: https://api.example.com/v1
+  #   description: Production server
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication.
+
+  schemas:
+    SearchRequest:
+      type: object
+      required:
+        - user_id
+        - query
+      properties:
+        user_id:
+          type: string
+          description: |
+            The unique identifier of the end user making the request.
+            This ID must be a string representation of an integer, as it will be used
+            to identify or create a user record in the backend database.
+          example: "1234567890"
+        query:
+          type: string
+          description: The search term to execute.
+          example: "example search query"
+
+    GenericSearchResultItem:
+      type: object
+      description: A single item from the search results. Structure can vary if from JSON/JSONL file.
+      additionalProperties: true
+      example:
+        id: "result-abc"
+        detail: "Some detail from a JSON result file"
+
+    TextFileResultItem:
+      type: object
+      description: Structure used when the result file is plain text or if a file was empty/unparseable.
+      properties:
+        type:
+          type: string
+          example: "text_file"
+        name:
+          type: string
+          example: "results_plain.txt"
+        content:
+          type: string
+          example: "This is the full content of the plain text file."
+        comment:
+          type: string
+          nullable: true
+          example: "File was empty or not valid JSON/JSONL."
+      required:
+        - type
+        - name
+        - content
+
+    AnySearchResultItem:
+      oneOf:
+        - $ref: '#/components/schemas/GenericSearchResultItem'
+        - $ref: '#/components/schemas/TextFileResultItem'
+
+    ApiResponseBase:
+      type: object
+      required:
+        - status
+        - message
+        - data
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+        message:
+          type: string
+        data:
+          type: array
+          description: |
+            Contains the search results on success, or an empty array on error.
+            The structure of items in the array depends on the format of the result file
+            processed by the backend. It could be parsed JSON objects, or a specific
+            structure for plain text files (see TextFileResultItem).
+          items:
+            $ref: '#/components/schemas/AnySearchResultItem'
+
+    ApiResponseSuccess:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseBase'
+        - type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            message:
+              type: string
+              example: "Search completed successfully."
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AnySearchResultItem'
+              examples:
+                - # Example 1: Result from a JSON file
+                  - id: "doc1"
+                    value: "some json data"
+                  - id: "doc2"
+                    value: "more json data"
+                - # Example 2: Result from a plain text file
+                  - type: "text_file"
+                    name: "query_results.txt"
+                    content: "Line 1 of text.\nLine 2 of text."
+                - # Example 3: Empty result file (now represented as a text_file type)
+                  - type: "text_file"
+                    name: "empty_results.txt"
+                    content: ""
+                    comment: "File was empty or not valid JSON/JSONL."
+
+    ApiResponseError:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponseBase'
+        - type: object
+          properties:
+            status:
+              type: string
+              example: "error"
+            data:
+              type: array
+              example: []
+              items: {}
+            message:
+              type: string
+              example: "Error message detailing the issue."
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /search:
+    post:
+      summary: Perform a search by submitting a job
+      description: |
+        Accepts a `user_id` (must be an integer string) and `query`.
+        The API submits this as a job to a backend processing system.
+        It then polls for job completion and returns the results once processed.
+        The results are read from a file generated by the backend.
+        Requires API key authentication.
+      tags:
+        - Search
+      operationId: searchOsintJob
+      requestBody:
+        description: User ID and search query
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search job completed successfully and results returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseSuccess'
+        '400':
+          description: Bad Request - Invalid input, missing parameters, malformed JSON, or user_id not an integer string.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                examples:
+                  missingField:
+                    value:
+                      status: "error"
+                      message: "Bad Request: Missing 'user_id' field"
+                      data: []
+                  userIdNotInt:
+                    value:
+                      status: "error"
+                      message: "Bad Request: 'user_id' must be a string that represents an integer for database operations."
+                      data: []
+        '401':
+          description: Unauthorized - Missing or invalid API Key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                example:
+                  status: "error"
+                  message: "Unauthorized: Invalid or missing API Key"
+                  data: []
+        '500':
+          description: |
+            Internal Server Error. This may occur if there's an issue with the API server itself,
+            if a backend job fails during processing, or if there's an error handling the results.
+            Specific details are logged on the server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                examples:
+                  dbUserManagementFailed: # Example of a specific internal error type (now generic to user)
+                    value:
+                      status: "error"
+                      message: "Internal server error: User record management failed." # This is already generic enough
+                      data: []
+                  backendJobFailed:
+                    value:
+                      status: "error"
+                      message: "Search job failed due to a backend processing error. Please check server logs for details or contact support." # New generic message
+                      data: []
+                  fileProcessingError:
+                    value:
+                      status: "error"
+                      message: "An error occurred while processing the search results. Please check server logs for details or contact support." # New generic message
+                      data: []
+                  unhandledException: # For the global 500 handler
+                    value:
+                      status: "error"
+                      message: "An unexpected internal server error occurred."
+                      data: []
+        '504':
+          description: Gateway Timeout - The search job was submitted, but the API timed out waiting for the backend to process it and return results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseError'
+                example:
+                  status: "error"
+                  message: "Search timed out waiting for results from the backend processor."
+                  data: []
+```
