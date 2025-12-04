@@ -33,6 +33,8 @@ from db_manager import (
     decrement_tokens,
     get_users_for_view,
     create_search_job,
+    create_auth_token,
+    redeem_auth_token,
     get_completed_jobs_for_user,
     mark_job_delivered,
     get_all_undelivered_jobs,
@@ -49,7 +51,7 @@ SELECTING_CATEGORY, TYPING_QUERY = range(2)
 SELECTING_BUY_OPTION, SELECTING_PLAN, SELECTING_TOKEN_AMOUNT, AWAITING_PAYMENT_CONFIRMATION, AWAITING_PROOF = range(10, 15)
 AWAITING_USER_ID_TO_BAN, CONFIRM_BAN, AWAITING_USER_ID_TO_UNBAN, CONFIRM_UNBAN = range(20, 24)
 ADMIN_GRANT_USER_ID, ADMIN_GRANT_TYPE, ADMIN_GRANT_SUB_PLAN, ADMIN_GRANT_TOKEN_AMOUNT, ADMIN_CONFIRM_GRANT = range(30, 35)
-
+ADMIN_GENERATE_TOKEN_DURATION = 40
 USER_PAGE_SIZE = 5
 RATE_LIMIT_SECONDS = 5
 
@@ -108,8 +110,25 @@ def get_admin_panel_keyboard():
         [InlineKeyboardButton("🚫 Ban User", callback_data='admin_ban_user_start')],
         [InlineKeyboardButton("✅ Unban User", callback_data='admin_unban_user_start')],
         [InlineKeyboardButton("🎁 Grant Access", callback_data='admin_grant_access_start')],
+        [InlineKeyboardButton("🔑 Generate Token", callback_data='admin_generate_token_start')],
         [InlineKeyboardButton("👥 View Users", callback_data='admin_view_users_page_1')],
         [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data='back_to_main_from_admin_panel')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+def get_token_duration_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("1 Day", callback_data='g_token_1'),
+            InlineKeyboardButton("1 Month", callback_data='g_token_30'),
+        ],
+        [
+            InlineKeyboardButton("3 Months", callback_data='g_token_90'),
+            InlineKeyboardButton("6 Months", callback_data='g_token_180'),
+        ],
+        [
+            InlineKeyboardButton("1 Year", callback_data='g_token_365'),
+        ],
+        [InlineKeyboardButton("⬅️ Cancel", callback_data='admin_generate_token_cancel')],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -919,10 +938,56 @@ async def deliver_results_background_job(context: ContextTypes.DEFAULT_TYPE) -> 
             except Exception as e_outer: logger.error(f"Outer error for job {job_id}, user {user_id}: {e_outer}. Retrying.")
     except Exception as e_crit: logger.error(f"Critical error in deliver_results_background_job: {e_crit}", exc_info=True)
 
+async def admin_generate_token_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    if not is_admin(query.from_user.id):
+        await query.edit_message_text("⚠️ Access Denied.")
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        "Select token duration:",
+        reply_markup=get_token_duration_keyboard()
+    )
+    return ADMIN_GENERATE_TOKEN_DURATION
+
+async def admin_generate_token_duration_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    duration_days = int(query.data.split('_')[2])
+    token = create_auth_token(duration_days)
+
+    if token:
+        await query.edit_message_text(
+            f"Generated Token: <code>{token}</code>\n\nExpires in {duration_days} days.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_panel_keyboard()
+        )
+    else:
+        await query.edit_message_text(
+            "Failed to generate token.",
+            reply_markup=get_admin_panel_keyboard()
+        )
+    return ConversationHandler.END
+
+async def redeem_token_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /redeem <token>")
+        return
+
+    token = args[0]
+    success, message = redeem_auth_token(token, user_id)
+    await update.message.reply_text(message)
+
 def main() -> None:
     application = Application.builder().token(config.BOT_TOKEN).build()
     application.add_error_handler(error_handler)
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("redeem", redeem_token_command))
     job_queue = application.job_queue
     job_queue.run_repeating(deliver_results_background_job, interval=30, first=10, name='result_delivery_job')
     logger.info("Background result delivery job scheduled.")
@@ -994,6 +1059,21 @@ def main() -> None:
     application.add_handler(ban_conv_handler)
     application.add_handler(unban_conv_handler)
     application.add_handler(grant_access_conv_handler)
+
+    # Handler for the token generation
+    generate_token_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_generate_token_start_callback, pattern='^admin_generate_token_start$')],
+        states={
+            ADMIN_GENERATE_TOKEN_DURATION: [
+                CallbackQueryHandler(admin_generate_token_duration_callback, pattern='^g_token_')
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_admin_action, pattern='^admin_generate_token_cancel$'),
+            CommandHandler('start', start_again_in_conversation)
+        ],
+    )
+    application.add_handler(generate_token_conv_handler)
     logger.info("Bot starting...")
     application.run_polling()
 
