@@ -1,6 +1,7 @@
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging # Optional: for logging DB operations
+import uuid
 
 # Setup logging (optional)
 logger = logging.getLogger(__name__)
@@ -53,6 +54,19 @@ def init_db():
             END;
         ''')
         # Jobs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT NOT NULL UNIQUE,
+                duration_days INTEGER NOT NULL,
+                expiry_date DATETIME NOT NULL,
+                is_used BOOLEAN DEFAULT FALSE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                used_at DATETIME,
+                used_by_user_id INTEGER
+            )
+        """)
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 job_id TEXT PRIMARY KEY,
@@ -563,6 +577,91 @@ def get_job_details(job_id: str) -> dict | None:
     finally:
         if conn: conn.close()
 
+def create_auth_token(duration_days: int) -> str | None:
+    """Generates a secure, unique token, stores it, and returns it."""
+    conn = get_db_connection()
+    try:
+        # Generate a unique token
+        token = uuid.uuid4().hex
+        now = datetime.now(timezone.utc)
+        expiry_date = now + timedelta(days=duration_days)
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO auth_tokens (token, duration_days, expiry_date)
+            VALUES (?, ?, ?)
+        """, (token, duration_days, expiry_date))
+        conn.commit()
+        logger.info(f"Created auth token with duration {duration_days} days.")
+        return token
+    except sqlite3.Error as e:
+        logger.error(f"Error creating auth token: {e}")
+        return None
+    finally:
+        if conn: conn.close()
+def redeem_auth_token(token: str, user_id: int) -> tuple[bool, str]:
+    """
+    Redeems an auth token, granting a subscription to the user.
+    Returns a tuple: (success: bool, message: str).
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM auth_tokens WHERE token = ?", (token,))
+        token_data = cursor.fetchone()
+
+        if not token_data:
+            return False, "Invalid token."
+
+        if token_data['is_used']:
+            return False, "Token has already been used."
+
+        expiry_date = datetime.fromisoformat(token_data['expiry_date'])
+        if expiry_date < datetime.now(timezone.utc):
+            return False, "Token has expired."
+
+        duration_days = token_data['duration_days']
+        subscription_type = f"{duration_days}_day_pass" # e.g., "30_day_pass"
+
+        # Grant subscription to the user
+        cursor.execute("SELECT subscription_expiry_date FROM users WHERE user_id = ?", (user_id,))
+        user_data = cursor.fetchone()
+
+        current_expiry_date_str = user_data['subscription_expiry_date'] if user_data else None
+
+        start_date = datetime.now(timezone.utc)
+        if current_expiry_date_str:
+            try:
+                current_expiry_date = datetime.fromisoformat(current_expiry_date_str)
+                if current_expiry_date > start_date:
+                    start_date = current_expiry_date
+            except (ValueError, TypeError):
+                # Handle cases where the date string is invalid or None
+                pass
+
+        user_expiry_date = start_date + timedelta(days=duration_days)
+
+        cursor.execute("""
+            UPDATE users
+            SET subscription_type = ?, subscription_expiry_date = ?
+            WHERE user_id = ?
+        """, (subscription_type, user_expiry_date, user_id))
+
+        # Mark token as used
+        cursor.execute("""
+            UPDATE auth_tokens
+            SET is_used = TRUE, used_at = ?, used_by_user_id = ?
+            WHERE token = ?
+        """, (datetime.now(timezone.utc), user_id, token))
+
+        conn.commit()
+        logger.info(f"User {user_id} redeemed token {token} for {duration_days} days.")
+        return True, f"Subscription for {duration_days} days has been successfully activated!"
+    except sqlite3.Error as e:
+        logger.error(f"Error redeeming token {token} for user {user_id}: {e}")
+        return False, "An internal error occurred while redeeming the token."
+    finally:
+        if conn: conn.close()
 def unban_user(user_id: int) -> bool:
     """Unbans a user by setting is_banned to FALSE."""
     conn = get_db_connection()
